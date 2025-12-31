@@ -546,66 +546,12 @@ app.get('/api/health', (req, res) => {
 // ==================== ENDPOINTS LEGACY (CAMPAMENTO) ====================
 // Los siguientes endpoints se mantienen para compatibilidad pero están obsoletos
 
+// NOTA: Autenticación con Google Sheets deshabilitada - Se usa Apps Script como intermediario
 // Configurar Google Sheets API con Service Account (LEGACY)
 let auth;
 let sheets;
 
-try {
-  // Intentar usar variables de entorno primero (Koyeb, Railway, etc.)
-  if (process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEETS_CLIENT_EMAIL) {
-    console.log('✅ Usando credenciales desde variables de entorno');
-    
-    // Reemplazar \\n con \n en la clave privada
-    const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n');
-    
-    auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-        private_key: privateKey,
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-  } else {
-    // Fallback: buscar archivo service-account.json (desarrollo local)
-    console.log('ℹ️ Variables de entorno no encontradas, buscando archivo service-account.json...');
-    
-    const possiblePaths = [
-      '/etc/secrets/service-account.json',  // Render Secret Files
-      path.join(__dirname, 'service-account.json'),  // server/service-account.json
-      path.join(__dirname, '../service-account.json'),  // raíz del proyecto
-    ];
-
-    let keyFilePath = null;
-    for (const testPath of possiblePaths) {
-      if (fs.existsSync(testPath)) {
-        keyFilePath = testPath;
-        console.log('✅ Credenciales encontradas en:', keyFilePath);
-        break;
-      }
-    }
-    
-    if (!keyFilePath) {
-      console.error('❌ ERROR: No se encontró el archivo service-account.json ni las variables de entorno');
-      console.error('   Variables de entorno requeridas:');
-      console.error('   - GOOGLE_SHEETS_PRIVATE_KEY');
-      console.error('   - GOOGLE_SHEETS_CLIENT_EMAIL');
-      console.error('   Rutas de archivo intentadas:');
-      possiblePaths.forEach(p => console.error(`   - ${p}`));
-      process.exit(1);
-    }
-    
-    auth = new google.auth.GoogleAuth({
-      keyFile: keyFilePath,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-  }
-
-  sheets = google.sheets({ version: 'v4', auth });
-  console.log('✅ Google Sheets API configurada correctamente');
-} catch (error) {
-  console.error('❌ Error al configurar Google Sheets:', error.message);
-  process.exit(1);
-}
+console.log('ℹ️ Backend configurado para usar Apps Script - Google Sheets API no requerida');
 
 // Obtener spreadsheetId del archivo .env o configuración
 const SPREADSHEET_ID = process.env.VITE_SPREADSHEET_ID || '1hCbcC82oeY4auvQ6TC4FdmWcfr35Cnw-EJcPg8B8MCg';
