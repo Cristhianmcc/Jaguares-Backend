@@ -9,7 +9,7 @@ import { config } from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cargar variables de entorno desde .env
+// Cargar variables de entorno desd .env
 config({ path: path.join(__dirname, '.env') });
 
 const app = express();
