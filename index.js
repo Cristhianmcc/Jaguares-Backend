@@ -273,6 +273,12 @@ app.post('/api/registrar-pago', async (req, res) => {
       throw new Error(data.error || 'Error al registrar pago');
     }
     
+    // INVALIDAR CACHÉ después de registrar pago
+    if (alumno.dni) {
+      invalidateDNICache(alumno.dni);
+    }
+    console.log('🗑️ CACHÉ INVALIDADO tras registrar pago');
+    
     res.json(data);
   } catch (error) {
     console.error('❌ Error al registrar pago:', error);
@@ -601,6 +607,14 @@ app.post('/api/activar-inscripciones/:dni', async (req, res) => {
     if (!response.ok) {
       throw new Error(data.error || 'Error al activar inscripciones');
     }
+    
+    // INVALIDAR CACHÉ después de activar inscripciones
+    invalidateDNICache(dni);
+    const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(horariosKeys);
+    cache.del(inscritosKeys);
+    console.log('🗑️ CACHÉ INVALIDADO tras activar inscripciones');
     
     res.json(data);
   } catch (error) {
