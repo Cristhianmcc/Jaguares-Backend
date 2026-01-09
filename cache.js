@@ -10,7 +10,7 @@ const NodeCache = require('node-cache');
 
 // Crear instancia de caché con configuración por defecto
 const cache = new NodeCache({
-    stdTTL: 300, // TTL por defecto: 5 minutos
+    stdTTL: 300, // TTL por defecto: 5 minuto
     checkperiod: 60, // Revisar expiración cada 60 segundos
     useClones: false // No clonar objetos (mejor performance)
 });
