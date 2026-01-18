@@ -1,0 +1,66 @@
+{
+  "fecha": "2026-01-17T17:14:36.493Z",
+  "tasaExito": "100.00%",
+  "estadisticas": {
+    "totalRequests": 88,
+    "exitosos": 88,
+    "fallidos": 0,
+    "timeouts": 0
+  },
+  "tiempos": {
+    "promedio": 222.78929659090912,
+    "min": 58.07750000000124,
+    "max": 438.16619999999966
+  },
+  "memoria": [
+    {
+      "timestamp": 1768670065469,
+      "heapUsed": 8,
+      "heapTotal": 12,
+      "rss": 43
+    },
+    {
+      "timestamp": 1768670065783,
+      "heapUsed": 18,
+      "heapTotal": 31,
+      "rss": 58
+    },
+    {
+      "timestamp": 1768670068787,
+      "heapUsed": 18,
+      "heapTotal": 32,
+      "rss": 58
+    },
+    {
+      "timestamp": 1768670069074,
+      "heapUsed": 28,
+      "heapTotal": 53,
+      "rss": 75
+    },
+    {
+      "timestamp": 1768670072086,
+      "heapUsed": 28,
+      "heapTotal": 53,
+      "rss": 75
+    },
+    {
+      "timestamp": 1768670072726,
+      "heapUsed": 34,
+      "heapTotal": 65,
+      "rss": 99
+    },
+    {
+      "timestamp": 1768670075727,
+      "heapUsed": 35,
+      "heapTotal": 65,
+      "rss": 99
+    },
+    {
+      "timestamp": 1768670076012,
+      "heapUsed": 36,
+      "heapTotal": 65,
+      "rss": 100
+    }
+  ],
+  "errores": []
+}

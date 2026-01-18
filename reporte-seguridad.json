@@ -1,0 +1,45 @@
+{
+  "fecha": "2026-01-17T16:32:40.146Z",
+  "vulnerabilidades": [
+    {
+      "tipo": "PRECIO_NEGATIVO",
+      "severidad": "ALTA",
+      "descripcion": "La BD permite precios negativos"
+    },
+    {
+      "tipo": "SIN_AUTENTICACION",
+      "severidad": "CRÍTICA",
+      "endpoint": "/api/admin/inscritos",
+      "descripcion": "Endpoint de admin accesible sin autenticación"
+    },
+    {
+      "tipo": "SIN_AUTENTICACION",
+      "severidad": "CRÍTICA",
+      "endpoint": "/api/admin/estadisticas-financieras",
+      "descripcion": "Endpoint de admin accesible sin autenticación"
+    }
+  ],
+  "warnings": [
+    {
+      "tipo": "SIN_LIMITE_HORARIOS",
+      "severidad": "BAJA",
+      "descripcion": "El sistema permite inscribir muchos horarios simultáneos"
+    },
+    {
+      "tipo": "SIN_RATE_LIMIT",
+      "severidad": "MEDIA",
+      "descripcion": "El sistema no tiene rate limiting"
+    },
+    {
+      "tipo": "CORS_PERMISIVO",
+      "severidad": "BAJA",
+      "descripcion": "CORS permite todos los orígenes (*)"
+    }
+  ],
+  "resumen": {
+    "criticas": 2,
+    "altas": 1,
+    "medias": 0,
+    "advertencias": 3
+  }
+}

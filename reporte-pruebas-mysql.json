@@ -1,0 +1,12 @@
+{
+  "fecha": "2026-01-17T16:12:50.593Z",
+  "estadisticas": {
+    "pruebasEjecutadas": 14,
+    "pruebasExitosas": 13,
+    "pruebasFallidas": 1,
+    "inscripcionesCreadas": 12,
+    "tiempoTotal": "21.70"
+  },
+  "tasaExito": "92.86%",
+  "estado": "ÓPTIMO"
+}
