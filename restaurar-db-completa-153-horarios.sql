@@ -1,0 +1,265 @@
+-- ============================================
+-- SCRIPT COMPLETO DE RESTAURACIÓN + CORRECCIONES DE CATEGORÍAS
+-- Base de datos JAGUARES - 153 Horarios
+-- Incluye correcciones de categorías para año 2019
+-- Fecha: 19 de Enero de 2026
+-- ============================================
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ============================================
+-- PASO 1: INSERTAR DEPORTES
+-- ============================================
+
+DELETE FROM deportes;
+ALTER TABLE deportes AUTO_INCREMENT = 1;
+
+INSERT INTO deportes (nombre, icono, matricula, estado) VALUES
+('Fútbol', 'sports_soccer', 20.00, 'activo'),                          -- ID 1
+('Fútbol Femenino', 'sports_soccer', 20.00, 'activo'),                 -- ID 2
+('Vóley', 'sports_volleyball', 20.00, 'activo'),                       -- ID 3
+('Básquet', 'sports_basketball', 20.00, 'activo'),                     -- ID 4
+('MAMAS FIT', 'fitness_center', 20.00, 'activo'),                      -- ID 5
+('ASODE', 'sports', 20.00, 'activo'),                                  -- ID 6
+('Entrenamiento Funcional Mixto', 'fitness_center', 20.00, 'activo'),  -- ID 7
+('GYM JUVENIL', 'fitness_center', 20.00, 'activo');                    -- ID 8
+
+-- ============================================
+-- PASO 2: ELIMINAR HORARIOS EXISTENTES
+-- ============================================
+
+DELETE FROM horarios;
+ALTER TABLE horarios AUTO_INCREMENT = 1;
+
+-- ============================================
+-- PASO 3: INSERTAR LOS 153 HORARIOS CON CATEGORÍAS CORREGIDAS
+-- ============================================
+
+INSERT INTO horarios (deporte_id, dia, hora_inicio, hora_fin, cupo_maximo, cupos_ocupados, estado, precio, plan, categoria, nivel, ano_min, ano_max, genero) VALUES
+-- ID 1-8: MAMAS FIT + Fútbol + Fútbol Femenino LUNES
+(5, 'LUNES', '06:30:00', '07:40:00', 20, 31, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(5, 'LUNES', '07:45:00', '09:00:00', 20, 32, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(1, 'LUNES', '08:10:00', '09:20:00', 20, 41, 'activo', 60, 'Económico', '2011-2012', NULL, 2011, 2012, 'Mixto'),
+(1, 'LUNES', '08:10:00', '09:20:00', 20, 36, 'activo', 60, 'Económico', '2014-2013', NULL, 2013, 2014, 'Mixto'),
+(2, 'LUNES', '09:20:00', '10:30:00', 20, 25, 'activo', 60, 'Económico', '2010-2015', NULL, 2010, 2015, 'Femenino'),
+(1, 'LUNES', '10:30:00', '11:40:00', 20, 36, 'activo', 60, 'Económico', '2016-2015', NULL, 2015, 2016, 'Mixto'),
+(1, 'LUNES', '10:30:00', '11:40:00', 20, 31, 'activo', 60, 'Económico', '2009-2010', NULL, 2009, 2010, 'Mixto'),
+(1, 'LUNES', '11:40:00', '12:50:00', 20, 32, 'activo', 60, 'Económico', '2018-2017', NULL, 2017, 2018, 'Mixto'),
+
+-- ID 9-16: MAMAS FIT + Fútbol + Fútbol Femenino MIERCOLES
+(5, 'MIERCOLES', '06:30:00', '07:40:00', 20, 20, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(5, 'MIERCOLES', '07:45:00', '09:00:00', 20, 18, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(1, 'MIERCOLES', '08:10:00', '09:20:00', 20, 5, 'activo', 60, 'Económico', '2011-2012', NULL, 2011, 2012, 'Mixto'),
+(1, 'MIERCOLES', '08:10:00', '09:20:00', 20, 2, 'activo', 60, 'Económico', '2014-2013', NULL, 2013, 2014, 'Mixto'),
+(2, 'MIERCOLES', '09:20:00', '10:30:00', 20, 8, 'activo', 60, 'Económico', '2010-2015', NULL, 2010, 2015, 'Femenino'),
+(1, 'MIERCOLES', '10:30:00', '11:40:00', 20, 2, 'activo', 60, 'Económico', '2016-2015', NULL, 2015, 2016, 'Mixto'),
+(1, 'MIERCOLES', '10:30:00', '11:40:00', 20, 4, 'activo', 60, 'Económico', '2009-2010', NULL, 2009, 2010, 'Mixto'),
+(1, 'MIERCOLES', '11:40:00', '12:50:00', 20, 1, 'activo', 60, 'Económico', '2018-2017', NULL, 2017, 2018, 'Mixto'),
+
+-- ID 17-28: Vóley LUNES y MIERCOLES
+(3, 'LUNES', '08:30:00', '09:40:00', 20, 3, 'activo', 60, 'Económico', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(3, 'LUNES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2010', NULL, 2010, 2010, 'Mixto'),
+(3, 'LUNES', '09:40:00', '10:50:00', 20, 2, 'activo', 60, 'Económico', '2011', NULL, 2011, 2011, 'Mixto'),
+(3, 'LUNES', '09:40:00', '10:50:00', 20, 1, 'activo', 60, 'Económico', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(3, 'LUNES', '10:50:00', '12:00:00', 20, 0, 'activo', 60, 'Económico', '2014', NULL, 2014, 2014, 'Mixto'),
+(3, 'LUNES', '10:50:00', '12:00:00', 20, 2, 'activo', 60, 'Económico', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(3, 'MIERCOLES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(3, 'MIERCOLES', '08:30:00', '09:40:00', 20, 0, 'activo', 60, 'Económico', '2010', NULL, 2010, 2010, 'Mixto'),
+(3, 'MIERCOLES', '09:40:00', '10:50:00', 20, 3, 'activo', 60, 'Económico', '2011', NULL, 2011, 2011, 'Mixto'),
+(3, 'MIERCOLES', '09:40:00', '10:50:00', 20, 0, 'activo', 60, 'Económico', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(3, 'MIERCOLES', '10:50:00', '12:00:00', 20, 1, 'activo', 60, 'Económico', '2014', NULL, 2014, 2014, 'Mixto'),
+(3, 'MIERCOLES', '10:50:00', '12:00:00', 20, 1, 'activo', 60, 'Económico', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+
+-- ID 29-42: MAMAS FIT + Vóley + Fútbol + Fútbol Femenino VIERNES
+(5, 'VIERNES', '06:30:00', '07:40:00', 20, 0, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(5, 'VIERNES', '07:45:00', '09:00:00', 20, 1, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(3, 'VIERNES', '08:30:00', '09:40:00', 20, 0, 'activo', 60, 'Económico', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(3, 'VIERNES', '08:30:00', '09:40:00', 20, 0, 'activo', 60, 'Económico', '2010', NULL, 2010, 2010, 'Mixto'),
+(3, 'VIERNES', '09:40:00', '10:50:00', 20, 1, 'activo', 60, 'Económico', '2011', NULL, 2011, 2011, 'Mixto'),
+(3, 'VIERNES', '09:40:00', '10:50:00', 20, 2, 'activo', 60, 'Económico', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(3, 'VIERNES', '10:50:00', '12:00:00', 20, 0, 'activo', 60, 'Económico', '2014', NULL, 2014, 2014, 'Mixto'),
+(3, 'VIERNES', '10:50:00', '12:00:00', 20, 1, 'activo', 60, 'Económico', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(1, 'VIERNES', '08:10:00', '09:20:00', 20, 4, 'activo', 60, 'Económico', '2011-2012', NULL, 2011, 2012, 'Mixto'),
+(1, 'VIERNES', '08:10:00', '09:20:00', 20, 0, 'activo', 60, 'Económico', '2014-2013', NULL, 2013, 2014, 'Mixto'),
+(2, 'VIERNES', '09:20:00', '10:30:00', 20, 2, 'activo', 60, 'Económico', '2010-2015', NULL, 2010, 2015, 'Femenino'),
+(1, 'VIERNES', '10:30:00', '11:40:00', 20, 1, 'activo', 60, 'Económico', '2016-2015', NULL, 2015, 2016, 'Mixto'),
+(1, 'VIERNES', '10:30:00', '11:40:00', 20, 1, 'activo', 60, 'Económico', '2009-2010', NULL, 2009, 2010, 'Mixto'),
+(1, 'VIERNES', '11:40:00', '12:50:00', 20, 0, 'activo', 60, 'Económico', '2018-2017', NULL, 2017, 2018, 'Mixto'),
+
+-- ID 43-54: Básquet MARTES y JUEVES
+(4, 'MARTES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(4, 'MARTES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2010', NULL, 2010, 2010, 'Mixto'),
+(4, 'MARTES', '09:40:00', '10:50:00', 20, 0, 'activo', 60, 'Económico', '2011', NULL, 2011, 2011, 'Mixto'),
+(4, 'MARTES', '09:40:00', '10:50:00', 20, 2, 'activo', 60, 'Económico', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(4, 'MARTES', '10:50:00', '12:00:00', 20, 1, 'activo', 60, 'Económico', '2014', NULL, 2014, 2014, 'Mixto'),
+(4, 'MARTES', '10:50:00', '12:00:00', 20, 0, 'activo', 60, 'Económico', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(4, 'JUEVES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(4, 'JUEVES', '08:30:00', '09:40:00', 20, 1, 'activo', 60, 'Económico', '2010', NULL, 2010, 2010, 'Mixto'),
+(4, 'JUEVES', '09:40:00', '10:50:00', 20, 0, 'activo', 60, 'Económico', '2011', NULL, 2011, 2011, 'Mixto'),
+(4, 'JUEVES', '09:40:00', '10:50:00', 20, 2, 'activo', 60, 'Económico', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(4, 'JUEVES', '10:50:00', '12:00:00', 20, 0, 'activo', 60, 'Económico', '2014', NULL, 2014, 2014, 'Mixto'),
+(4, 'JUEVES', '10:50:00', '12:00:00', 20, 0, 'activo', 60, 'Económico', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+
+-- ID 55-60: ASODE SABADO
+(6, 'SABADO', '15:30:00', '16:30:00', 20, 14, 'activo', 200, 'Premium', '2009-2010', 'PC', 2009, 2010, 'Mixto'),
+(6, 'SABADO', '15:30:00', '16:30:00', 20, 13, 'activo', 200, 'Premium', '2011-2012', 'PC', 2011, 2012, 'Mixto'),
+(6, 'SABADO', '16:30:00', '17:30:00', 20, 13, 'activo', 200, 'Premium', '2012-2013', 'PC', 2012, 2013, 'Mixto'),
+(6, 'SABADO', '16:30:00', '17:30:00', 20, 11, 'activo', 200, 'Premium', '2014', 'PC', 2014, 2014, 'Mixto'),
+(6, 'SABADO', '17:30:00', '18:30:00', 20, 17, 'activo', 200, 'Premium', '2015-2016', 'PC', 2015, 2016, 'Mixto'),
+(6, 'SABADO', '17:30:00', '18:30:00', 20, 8, 'activo', 200, 'Premium', '2017', 'PC', 2017, 2017, 'Mixto'),
+
+-- ID 61-78: Fútbol LUNES y MIERCOLES (tarde) - CON CORRECCIONES DE CATEGORÍAS
+(1, 'LUNES', '15:30:00', '16:55:00', 20, 0, 'activo', 120, 'Estándar', '2020-2021', 'NF', 2020, 2021, 'Mixto'),
+(1, 'LUNES', '15:30:00', '16:55:00', 20, 12, 'activo', 120, 'Estándar', '2019-2020', 'I', 2019, 2020, 'Mixto'),
+(1, 'LUNES', '17:00:00', '18:25:00', 20, 0, 'activo', 200, 'Premium', '2017', 'PC', 2017, 2017, 'Mixto'),
+(1, 'LUNES', '17:00:00', '18:25:00', 20, 2, 'activo', 200, 'Premium', '2016', 'PC', 2016, 2016, 'Mixto'),
+(1, 'LUNES', '17:00:00', '18:25:00', 20, 0, 'activo', 120, 'Estándar', '2014', 'I', 2014, 2014, 'Mixto'),
+(1, 'LUNES', '17:00:00', '18:25:00', 20, 0, 'activo', 120, 'Estándar', '2015', 'NF', 2015, 2015, 'Mixto'),
+(1, 'LUNES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2014', 'PC', 2014, 2014, 'Mixto'),
+(1, 'LUNES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2015', 'PC', 2015, 2015, 'Mixto'),
+(1, 'LUNES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2013-2014-2015', 'PC', 2013, 2015, 'Mixto'),
+(1, 'MIERCOLES', '15:30:00', '16:55:00', 20, 0, 'activo', 120, 'Estándar', '2020-2021', 'NF', 2020, 2021, 'Mixto'),
+(1, 'MIERCOLES', '15:30:00', '16:55:00', 20, 1, 'activo', 120, 'Estándar', '2019', 'I', 2019, 2019, 'Mixto'),
+(1, 'MIERCOLES', '17:00:00', '18:25:00', 20, 0, 'activo', 200, 'Premium', '2017', 'PC', 2017, 2017, 'Mixto'),
+(1, 'MIERCOLES', '17:00:00', '18:25:00', 20, 2, 'activo', 200, 'Premium', '2016', 'PC', 2016, 2016, 'Mixto'),
+(1, 'MIERCOLES', '17:00:00', '18:25:00', 20, 1, 'activo', 120, 'Estándar', '2014', 'I', 2014, 2014, 'Mixto'),
+(1, 'MIERCOLES', '17:00:00', '18:25:00', 20, 0, 'activo', 120, 'Estándar', '2015', 'NF', 2015, 2015, 'Mixto'),
+(1, 'MIERCOLES', '18:30:00', '19:55:00', 20, 1, 'activo', 200, 'Premium', '2014', 'PC', 2014, 2014, 'Mixto'),
+(1, 'MIERCOLES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2015', 'PC', 2015, 2015, 'Mixto'),
+(1, 'MIERCOLES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2013-2014-2015', 'PREMIUM', 2013, 2015, 'Mixto'),
+
+-- ID 79-85: Fútbol VIERNES (tarde)
+(1, 'VIERNES', '17:00:00', '18:25:00', 20, 0, 'activo', 200, 'Premium', '2017', 'PC', 2017, 2017, 'Mixto'),
+(1, 'VIERNES', '17:00:00', '18:25:00', 20, 2, 'activo', 200, 'Premium', '2016', 'PC', 2016, 2016, 'Mixto'),
+(1, 'VIERNES', '17:00:00', '18:25:00', 20, 0, 'activo', 120, 'Estándar', '2014', 'I', 2014, 2014, 'Mixto'),
+(1, 'VIERNES', '17:00:00', '18:25:00', 20, 0, 'activo', 120, 'Estándar', '2015', 'NF', 2015, 2015, 'Mixto'),
+(1, 'VIERNES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2014', 'PC', 2014, 2014, 'Mixto'),
+(1, 'VIERNES', '18:30:00', '19:55:00', 20, 0, 'activo', 200, 'Premium', '2015', 'PC', 2015, 2015, 'Mixto'),
+(1, 'VIERNES', '18:30:00', '19:55:00', 20, 2, 'activo', 200, 'Premium', '2013-2014-2015', 'PREMIUM', 2013, 2015, 'Mixto'),
+
+-- ID 86-99: Fútbol MARTES y JUEVES (tarde) - CON CORRECCIONES DE CATEGORÍAS
+(1, 'MARTES', '15:30:00', '16:50:00', 20, 15, 'activo', 120, 'Estándar', '2018-2019', 'NF', 2018, 2019, 'Mixto'),
+(1, 'MARTES', '15:30:00', '16:50:00', 20, 0, 'activo', 120, 'Estándar', '2020-2021', 'NF', 2020, 2021, 'Mixto'),
+(1, 'MARTES', '15:30:00', '16:50:00', 20, 3, 'activo', 120, 'Estándar', '2008-2009-2010-2011', 'NF', 2008, 2011, 'Mixto'),
+(1, 'MARTES', '17:00:00', '18:20:00', 20, 0, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+(1, 'MARTES', '17:00:00', '18:20:00', 20, 1, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+(1, 'MARTES', '17:00:00', '18:20:00', 20, 6, 'activo', 120, 'Estándar', '2014-2013-2012', 'NF', 2012, 2014, 'Mixto'),
+(1, 'MARTES', '18:30:00', '19:50:00', 20, 0, 'activo', 200, 'Premium', '2009-2010-2011-2012', 'PC', 2009, 2012, 'Mixto'),
+(1, 'JUEVES', '15:30:00', '16:50:00', 20, 0, 'activo', 120, 'Estándar', '2018-2019', 'NF', 2018, 2019, 'Mixto'),
+(1, 'JUEVES', '15:30:00', '16:50:00', 20, 0, 'activo', 120, 'Estándar', '2020-2021', 'NF', 2020, 2021, 'Mixto'),
+(1, 'JUEVES', '15:30:00', '16:50:00', 20, 3, 'activo', 120, 'Estándar', '2008-2009-2010-2011', 'NF', 2008, 2011, 'Mixto'),
+(1, 'JUEVES', '17:00:00', '18:20:00', 20, 0, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+(1, 'JUEVES', '17:00:00', '18:20:00', 20, 0, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+(1, 'JUEVES', '17:00:00', '18:20:00', 20, 5, 'activo', 120, 'Estándar', '2014-2013-2012', 'NF', 2012, 2014, 'Mixto'),
+(1, 'JUEVES', '18:30:00', '19:50:00', 20, 0, 'activo', 200, 'Premium', '2009-2010-2011-2012', 'PREMIUM', 2009, 2012, 'Mixto'),
+
+-- ID 100-105: Fútbol SABADO
+(1, 'SABADO', '08:30:00', '09:50:00', 20, 0, 'activo', 0, '', '2008-2009', NULL, 2008, 2009, 'Mixto'),
+(1, 'SABADO', '08:30:00', '09:50:00', 20, 3, 'activo', 120, 'Estándar', '2010-2011', 'NF', 2010, 2011, 'Mixto'),
+(1, 'SABADO', '08:30:00', '09:50:00', 20, 4, 'activo', 120, 'Estándar', '2012-2013', 'NF', 2012, 2013, 'Mixto'),
+(1, 'SABADO', '08:30:00', '09:50:00', 20, 0, 'activo', 120, 'Estándar', '2014', 'NF', 2014, 2014, 'Mixto'),
+(1, 'SABADO', '10:00:00', '11:20:00', 20, 0, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+(1, 'SABADO', '10:00:00', '11:20:00', 20, 0, 'activo', 120, 'Estándar', '2017-2016', 'NF', 2016, 2017, 'Mixto'),
+
+-- ID 106-120: Vóley LUNES y MIERCOLES (tarde)
+(3, 'LUNES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2014', 'BÁSICO', 2013, 2014, 'Mixto'),
+(3, 'LUNES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2015-2016', 'BÁSICO', 2015, 2016, 'Mixto'),
+(3, 'LUNES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2010-2009', 'BÁSICO', 2009, 2010, 'Mixto'),
+(3, 'LUNES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2012-2011', 'BÁSICO', 2011, 2012, 'Mixto'),
+(3, 'LUNES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2011-2010', 'AVANZADO', 2010, 2011, 'Mixto'),
+(3, 'LUNES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2012', 'AVANZADO', 2012, 2013, 'Mixto'),
+(7, 'LUNES', '15:45:00', '16:45:00', 20, 4, 'activo', 100, 'Estándar', 'adulto +18', NULL, 1900, 2008, 'Mixto'),
+(8, 'LUNES', '15:00:00', '16:00:00', 20, 4, 'activo', 100, 'Estándar', '2005-2009', 'AVANZADO', 2005, 2009, 'Mixto'),
+(5, 'LUNES', '16:00:00', '17:00:00', 20, 0, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(3, 'MIERCOLES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2014', 'BÁSICO', 2013, 2014, 'Mixto'),
+(3, 'MIERCOLES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2015-2016', 'BÁSICO', 2015, 2016, 'Mixto'),
+(3, 'MIERCOLES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2010-2009', 'BÁSICO', 2009, 2010, 'Mixto'),
+(3, 'MIERCOLES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2012-2011', 'BÁSICO', 2011, 2012, 'Mixto'),
+(3, 'MIERCOLES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2011-2010', 'AVANZADO', 2010, 2011, 'Mixto'),
+(3, 'MIERCOLES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2012', 'AVANZADO', 2012, 2013, 'Mixto'),
+
+-- ID 121-130: Entrenamiento Funcional + Vóley VIERNES (tarde)
+(7, 'MIERCOLES', '15:45:00', '16:45:00', 20, 0, 'activo', 100, 'Estándar', 'adulto +18', NULL, 1900, 2008, 'Mixto'),
+(3, 'VIERNES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2014', 'BÁSICO', 2013, 2014, 'Mixto'),
+(3, 'VIERNES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2015-2016', 'BÁSICO', 2015, 2016, 'Mixto'),
+(3, 'VIERNES', '16:00:00', '17:30:00', 20, 1, 'activo', 120, 'Estándar', '2010-2009', 'BÁSICO', 2009, 2010, 'Mixto'),
+(3, 'VIERNES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2012-2011', 'BÁSICO', 2011, 2012, 'Mixto'),
+(3, 'VIERNES', '17:30:00', '19:00:00', 20, 1, 'activo', 120, 'Estándar', '2011-2010', 'AVANZADO', 2010, 2011, 'Mixto'),
+(3, 'VIERNES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2013-2012', 'AVANZADO', 2012, 2013, 'Mixto'),
+(7, 'VIERNES', '15:45:00', '16:45:00', 20, 0, 'activo', 100, 'Estándar', 'adulto +18', NULL, 1900, 2008, 'Mixto'),
+(8, 'VIERNES', '15:00:00', '16:00:00', 20, 0, 'activo', 100, 'Estándar', '2005-2009', NULL, 2005, 2009, 'Mixto'),
+(5, 'VIERNES', '16:00:00', '17:00:00', 20, 0, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+
+-- ID 131-148: Básquet MARTES, JUEVES y SABADO (tarde)
+(4, 'MARTES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2017', NULL, 2017, 2017, 'Mixto'),
+(4, 'MARTES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(4, 'MARTES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2014', NULL, 2014, 2014, 'Mixto'),
+(4, 'MARTES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(4, 'MARTES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2009', NULL, 2009, 2009, 'Mixto'),
+(4, 'MARTES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2010-2011', NULL, 2010, 2011, 'Mixto'),
+(4, 'JUEVES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2017', NULL, 2017, 2017, 'Mixto'),
+(4, 'JUEVES', '14:30:00', '16:00:00', 20, 0, 'activo', 120, 'Estándar', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(4, 'JUEVES', '16:00:00', '17:30:00', 20, 0, 'activo', 120, 'Estándar', '2011', NULL, 2011, 2011, 'Mixto'),
+(4, 'JUEVES', '16:00:00', '17:30:00', 20, 1, 'activo', 120, 'Estándar', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(4, 'JUEVES', '17:30:00', '19:00:00', 20, 0, 'activo', 120, 'Estándar', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(4, 'JUEVES', '17:30:00', '19:00:00', 20, 1, 'activo', 120, 'Estándar', '2010-2011', NULL, 2010, 2011, 'Mixto'),
+(4, 'SABADO', '08:30:00', '10:00:00', 20, 0, 'activo', 120, 'Estándar', '2009-2008', NULL, 2008, 2009, 'Mixto'),
+(4, 'SABADO', '08:30:00', '10:00:00', 20, 1, 'activo', 120, 'Estándar', '2010-2011', NULL, 2010, 2011, 'Mixto'),
+(4, 'SABADO', '10:00:00', '11:30:00', 20, 1, 'activo', 120, 'Estándar', '2012-2013', NULL, 2012, 2013, 'Mixto'),
+(4, 'SABADO', '10:00:00', '11:30:00', 20, 1, 'activo', 120, 'Estándar', '2014', NULL, 2014, 2014, 'Mixto'),
+(4, 'SABADO', '11:30:00', '13:00:00', 20, 1, 'activo', 120, 'Estándar', '2015-2016', NULL, 2015, 2016, 'Mixto'),
+(4, 'SABADO', '11:30:00', '13:00:00', 20, 1, 'activo', 120, 'Estándar', '2017', NULL, 2017, 2017, 'Mixto'),
+
+-- ID 149-153: MAMAS FIT y GYM JUVENIL (tarde)
+(5, 'LUNES', '17:00:00', '18:00:00', 20, 0, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(8, 'MIERCOLES', '15:00:00', '16:00:00', 20, 1, 'activo', 100, 'Estándar', '2005-2009', NULL, 2005, 2009, 'Mixto'),
+(5, 'MIERCOLES', '16:00:00', '17:00:00', 20, 1, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(5, 'MIERCOLES', '17:00:00', '18:00:00', 20, 1, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino'),
+(5, 'VIERNES', '17:00:00', '18:00:00', 20, 1, 'activo', 60, 'Económico', 'adulto +18', NULL, 1900, 2008, 'Femenino');
+
+-- ============================================
+-- PASO 4: VERIFICACIÓN
+-- ============================================
+
+SELECT 'Restauración completa exitosa' as status, 
+       COUNT(*) as total_horarios_insertados 
+FROM horarios 
+WHERE estado = 'activo';
+
+SELECT d.nombre as deporte, COUNT(h.horario_id) as cantidad_horarios
+FROM deportes d
+LEFT JOIN horarios h ON d.deporte_id = h.deporte_id
+GROUP BY d.deporte_id, d.nombre
+ORDER BY d.deporte_id;
+
+-- Verificar horarios para año 2019 (prueba de categorías)
+SELECT 
+  h.horario_id,
+  d.nombre as deporte,
+  h.dia,
+  TIME_FORMAT(h.hora_inicio, '%H:%i') as hora_inicio,
+  TIME_FORMAT(h.hora_fin, '%H:%i') as hora_fin,
+  h.categoria,
+  h.nivel,
+  h.ano_min,
+  h.ano_max
+FROM horarios h
+INNER JOIN deportes d ON h.deporte_id = h.deporte_id
+WHERE d.nombre = 'Fútbol' 
+  AND h.estado = 'activo'
+  AND 2019 BETWEEN h.ano_min AND h.ano_max
+ORDER BY h.dia, h.hora_inicio;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================================
+-- NOTAS IMPORTANTES
+-- ============================================
+-- 1. Este script inserta exactamente 153 horarios
+-- 2. Los cupos_ocupados están actualizados según Google Sheets (19 Enero 2026)
+-- 3. TODAS las categorías están incluidas (categoria, nivel, ano_min, ano_max)
+-- 4. Incluye correcciones de categorías para año 2019
+-- 5. Se incluyen todos los deportes: Fútbol, Fútbol Femenino, Vóley, Básquet, 
+--    MAMAS FIT, ASODE, Entrenamiento Funcional Mixto, GYM JUVENIL
+-- 6. Compatible con el sistema actual (triggers, vistas, etc.)
