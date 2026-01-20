@@ -108,9 +108,9 @@ export const corsOptions = {
             'http://127.0.0.1:5501',
             'http://127.0.0.1:5502',
             'http://127.0.0.1:8080',
-            // Agregar dominio de producción aquí
-            // 'https://tudominio.com',
-            // 'https://www.tudominio.com'
+            // Dominios de Producción
+            'https://escuelajaguares.netlify.app',
+            'https://jaguares-backend.onrender.com'
         ];
 
         // Permitir requests sin origin (como Postman, curl, apps móviles)
@@ -161,16 +161,16 @@ export const sanitizeInput = (req, res, next) => {
     // Función para limpiar strings
     const cleanString = (str) => {
         if (typeof str !== 'string') return str;
-        
+
         // Remover tags HTML
         let clean = str.replace(/<[^>]*>/g, '');
-        
+
         // Escapar caracteres peligrosos
         clean = clean
             .replace(/[<>]/g, '')
             .replace(/javascript:/gi, '')
             .replace(/on\w+=/gi, '');
-        
+
         return clean.trim();
     };
 
