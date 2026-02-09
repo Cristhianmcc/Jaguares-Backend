@@ -65,6 +65,9 @@ initDatabase();
 const app = express();
 const PORT = process.env.PORT || 3002;
 
+// Confiar en proxy reverso (Traefik/Dokploy) para headers X-Forwarded-*
+app.set('trust proxy', 1);
+
 // ==================== CONFIGURACIÓN ACADEMIA DEPORTIVA ====================
 
 // URL y TOKEN del Apps Script (backend transaccional)
