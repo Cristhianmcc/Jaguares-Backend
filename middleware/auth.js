@@ -87,7 +87,7 @@ export const verificarAdmin = (req, res, next) => {
 };
 
 /**
- * Generar token JWT
+ * Generar token JWT haciendo copia
  */
 export const generarToken = (usuario) => {
     const payload = {
