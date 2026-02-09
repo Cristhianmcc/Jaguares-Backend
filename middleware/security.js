@@ -108,9 +108,9 @@ export const corsOptions = {
             'http://127.0.0.1:5501',
             'http://127.0.0.1:5502',
             'http://127.0.0.1:8080',
-            // Agregar dominio de producción aquí
-            // 'https://tudominio.com',
-            // 'https://www.tudominio.com'
+            // Producción Dokploy
+            'http://187.77.6.232.nip.io',
+            'http://api.187.77.6.232.nip.io'
         ];
 
         // Permitir requests sin origin (como Postman, curl, apps móviles)
