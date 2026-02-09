@@ -108,9 +108,13 @@ export const corsOptions = {
             'http://127.0.0.1:5501',
             'http://127.0.0.1:5502',
             'http://127.0.0.1:8080',
-            // Producción Dokploy
+            // Producción Dokploy (Legacy)
             'http://187.77.6.232.nip.io',
-            'http://api.187.77.6.232.nip.io'
+            'http://api.187.77.6.232.nip.io',
+            // Producción Dominio Real
+            'https://jaguarescar.com',
+            'https://api.jaguarescar.com',
+            'https://www.jaguarescar.com'
         ];
 
         // Permitir requests sin origin (como Postman, curl, apps móviles)
