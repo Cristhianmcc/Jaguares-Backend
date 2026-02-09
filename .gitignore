@@ -1,0 +1,84 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (credenciales)
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Backups y datos sensibles
+backup-*.sql
+backups-prod/
+*.dump
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos temporales de test y reportes
+test-*.json
+test-*.js
+reporte-*.json
+reporte-*.txt
+reporte-*.js
+
+# Scripts de desarrollo local
+crear-db-produccion.bat
+backup-database.bat
+backup-produccion.bat
+resetear-produccion.bat
+importar-a-rds.bat
+*.bat
+
+# Archivos de debug y simulación
+debug-*.js
+simulador-*.js
+verificar-sistema.js
+auditar-datos.js
+
+# Archivos SQL temporales y parches
+patch-*.js
+fix-*.sql
+import-*.sql
+insert-*.sql
+triggers-fix*.sql
+correcciones-criticas.sql
+sincronizar-*.sql
+reimport-*.sql
+restaurar-*.sql
+reset-cupos.sql
+limpiar-datos-prueba.sql
+clean-test-data.sql
+recrear-*.sql
+force-cleanup-*.sql
+
+# Scripts de procesamiento temporal
+procesar-*.js
+corregir-*.js
+insertar-categorias-*.js
+actualizar-*.js
+cambiar-*.js
+generar-*.js
+gen-*.cjs
+generate-*.js
+sincronizar-*.js
+check-*.js
+
+# Datos y archivos CSV/TXT
+*.csv
+*.txt
+horarios*.csv
+data-essential.sql
+
+# Scripts SQL específicos de migración
+crear-tabla-*.sql
+crear-inscripciones-usuarios.sql
+agregar-campos-*.sql
+actualizar-*.sql
+update-*.sql
+datos-prueba-*.sql
+
+# Scripts PowerShell de testing
+*.ps1
