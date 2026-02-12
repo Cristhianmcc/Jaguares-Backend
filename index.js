@@ -214,10 +214,11 @@ app.get('/api/debug/horarios', async (req, res) => {
 app.get('/api/horarios', async (req, res) => {
   try {
     const añoNacimiento = req.query.año_nacimiento || req.query.ano_nacimiento;
+    const sexo = req.query.sexo; // Obtener género del alumno
     const forceRefresh = req.query.refresh === 'true';
 
-    // Clave de caché diferente si hay filtro de edad
-    const cacheKey = getCacheKey('horarios', añoNacimiento || 'all');
+    // Clave de caché diferente si hay filtro de edad Y género
+    const cacheKey = getCacheKey('horarios', `${añoNacimiento || 'all'}_${sexo || 'all'}`);
 
     // Intentar obtener del caché (si no se fuerza refresh)
     if (!forceRefresh) {
@@ -270,6 +271,12 @@ app.get('/api/horarios', async (req, res) => {
         if (añoNacimiento) {
           query += ` AND ? BETWEEN h.ano_min AND h.ano_max`;
           params.push(parseInt(añoNacimiento));
+        }
+
+        // FILTRO POR GÉNERO: Excluir "MAMAS FIT" para usuarios masculinos
+        if (sexo && (sexo.toUpperCase() === 'MASCULINO' || sexo.toUpperCase() === 'M')) {
+          query += ` AND UPPER(d.nombre) != 'MAMAS FIT'`;
+          console.log('🚫 FILTRO APLICADO: Excluyendo MAMAS FIT para usuario masculino');
         }
 
         query += ` ORDER BY d.nombre, h.dia, h.hora_inicio`;
@@ -1077,7 +1084,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           });
         }
 
-        // Obtener inscripciones activas
+        // Obtener inscripciones activas Y suspendidas (para mostrar opción de reactivar)
         const [inscripciones] = await db.query(`
           SELECT 
             i.inscripcion_id,
@@ -1089,7 +1096,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             i.fecha_inscripcion as fecha_registro
           FROM inscripciones i
           JOIN deportes d ON i.deporte_id = d.deporte_id
-          WHERE i.alumno_id = ? AND i.estado = 'activa'
+          WHERE i.alumno_id = ? AND i.estado IN ('activa', 'suspendida')
         `, [alumno.alumno_id]);
 
         // Obtener horarios de cada inscripción
@@ -1110,6 +1117,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           if (horarios.length > 0) {
             horarios.forEach(h => {
               horariosCompletos.push({
+                inscripcion_id: inscripcion.inscripcion_id,
                 deporte: inscripcion.deporte,
                 sede: 'Sede Principal',
                 plan: inscripcion.plan || 'Económico',
@@ -1118,11 +1126,13 @@ app.get('/api/consultar/:dni', async (req, res) => {
                 hora_fin: h.hora_fin,
                 categoria: h.categoria,
                 precio: inscripcion.precio_mensual,
-                fecha_inscripcion: inscripcion.fecha_inscripcion
+                fecha_inscripcion: inscripcion.fecha_inscripcion,
+                estado_inscripcion: inscripcion.estado
               });
             });
           } else {
             horariosCompletos.push({
+              inscripcion_id: inscripcion.inscripcion_id,
               deporte: inscripcion.deporte,
               sede: 'Sede Principal',
               plan: inscripcion.plan || 'Económico',
@@ -1131,13 +1141,16 @@ app.get('/api/consultar/:dni', async (req, res) => {
               hora_fin: null,
               categoria: '',
               precio: inscripcion.precio_mensual,
-              fecha_inscripcion: inscripcion.fecha_inscripcion
+              fecha_inscripcion: inscripcion.fecha_inscripcion,
+              estado_inscripcion: inscripcion.estado
             });
           }
         }
 
-        // Calcular monto total
-        const montoTotal = inscripciones.reduce((sum, i) => sum + parseFloat(i.precio_mensual || 0), 0);
+        // Calcular monto total (SOLO de inscripciones activas)
+        const montoTotal = inscripciones
+          .filter(i => i.estado === 'activa')
+          .reduce((sum, i) => sum + parseFloat(i.precio_mensual || 0), 0);
 
         const resultado = {
           success: true,
@@ -1562,6 +1575,132 @@ app.post('/api/pago-mensual', async (req, res) => {
   }
 });
 
+// ==================== ENDPOINT PAUSAR/REACTIVAR DEPORTE ====================
+
+/**
+ * Pausar o reactivar una inscripción de deporte
+ * Regla de negocio: Solo se puede PAUSAR los primeros 5 días del mes
+ * Reactivar se puede hacer en cualquier momento
+ */
+app.post('/api/alumno/toggle-deporte', async (req, res) => {
+  try {
+    const { dni, inscripcion_id, accion } = req.body;
+
+    // Validar parámetros
+    if (!dni || !inscripcion_id || !accion) {
+      return res.status(400).json({
+        success: false,
+        error: 'Faltan parámetros requeridos: dni, inscripcion_id, accion'
+      });
+    }
+
+    if (!['pausar', 'reactivar'].includes(accion)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Acción inválida. Use "pausar" o "reactivar"'
+      });
+    }
+
+    console.log(`🔄 Toggle deporte - DNI: ${dni}, Inscripción: ${inscripcion_id}, Acción: ${accion}`);
+
+    // Verificar que el alumno existe y obtener su ID
+    const [alumnoRows] = await db.query(
+      'SELECT alumno_id, nombres, apellido_paterno FROM alumnos WHERE dni = ?',
+      [dni]
+    );
+
+    if (alumnoRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Alumno no encontrado'
+      });
+    }
+
+    const alumno = alumnoRows[0];
+
+    // Verificar que la inscripción pertenece al alumno
+    const [inscripcionRows] = await db.query(`
+      SELECT i.inscripcion_id, i.estado, d.nombre as deporte, i.precio_mensual
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE i.inscripcion_id = ? AND i.alumno_id = ?
+    `, [inscripcion_id, alumno.alumno_id]);
+
+    if (inscripcionRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Inscripción no encontrada o no pertenece a este alumno'
+      });
+    }
+
+    const inscripcion = inscripcionRows[0];
+
+    // Si es PAUSAR, verificar que está activa
+    // Nota: No hay restricción de fecha porque el pago es mensual.
+    // Si pausa después del 5, ya pagó ese mes, el cambio aplica al siguiente.
+    if (accion === 'pausar') {
+      // Verificar que está activa
+      if (inscripcion.estado !== 'activa') {
+        return res.status(400).json({
+          success: false,
+          error: `No se puede pausar una inscripción que ya está "${inscripcion.estado}"`
+        });
+      }
+    }
+
+    // Si es REACTIVAR, verificar que está suspendida
+    if (accion === 'reactivar') {
+      if (inscripcion.estado !== 'suspendida') {
+        return res.status(400).json({
+          success: false,
+          error: `No se puede reactivar una inscripción que está "${inscripcion.estado}"`
+        });
+      }
+    }
+
+    // Ejecutar el cambio de estado
+    const nuevoEstado = accion === 'pausar' ? 'suspendida' : 'activa';
+    
+    await db.query(`
+      UPDATE inscripciones 
+      SET estado = ?, updated_at = NOW()
+      WHERE inscripcion_id = ?
+    `, [nuevoEstado, inscripcion_id]);
+
+    // Calcular nuevo monto mensual (solo inscripciones activas)
+    const [montoRows] = await db.query(`
+      SELECT COALESCE(SUM(precio_mensual), 0) as total
+      FROM inscripciones 
+      WHERE alumno_id = ? AND estado = 'activa'
+    `, [alumno.alumno_id]);
+
+    const nuevoMontoMensual = montoRows[0].total;
+
+    // Invalidar caché del usuario
+    invalidateDNICache(dni);
+
+    console.log(`✅ Deporte ${accion === 'pausar' ? 'pausado' : 'reactivado'}: ${inscripcion.deporte} - Nuevo monto mensual: S/${nuevoMontoMensual}`);
+
+    res.json({
+      success: true,
+      message: accion === 'pausar' 
+        ? `Has pausado "${inscripcion.deporte}". No se incluirá en tu próximo pago mensual.`
+        : `Has reactivado "${inscripcion.deporte}". Se incluirá en tu próximo pago mensual.`,
+      deporte: inscripcion.deporte,
+      nuevoEstado: nuevoEstado,
+      nuevoMontoMensual: nuevoMontoMensual,
+      alumno: `${alumno.nombres} ${alumno.apellido_paterno}`
+    });
+
+  } catch (error) {
+    console.error('❌ Error al toggle deporte:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Error al procesar la solicitud'
+    });
+  }
+});
+
 // ==================== ENDPOINTS ADMINISTRACIÓN ====================
 
 // ==================== ENDPOINTS ADMINISTRACIÓN ====================
@@ -1774,7 +1913,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
               hora_inicio: row.hora_inicio,
               hora_fin: row.hora_fin,
               estado_usuario: row.estado_usuario,
-              estado: row.estado_inscripcion,
+              estado: row.estado_pago, // USAR estado_pago de alumnos, no estado_inscripcion
               estado_pago: row.estado_pago,
               fecha_registro: row.fecha_registro
             });
@@ -4890,10 +5029,12 @@ app.get('/api/admin/inscripciones', async (req, res) => {
         a.foto_carnet_url,
         a.created_at,
         a.updated_at,
-        COUNT(i.inscripcion_id) as total_inscripciones,
-        GROUP_CONCAT(DISTINCT d.nombre SEPARATOR ', ') as deportes_inscritos
+        COUNT(CASE WHEN i.estado = 'activa' THEN 1 END) as total_inscripciones,
+        GROUP_CONCAT(DISTINCT CASE WHEN i.estado = 'activa' THEN d.nombre END SEPARATOR ', ') as deportes_inscritos,
+        GROUP_CONCAT(DISTINCT CASE WHEN i.estado = 'suspendida' THEN d.nombre END SEPARATOR ', ') as deportes_pausados,
+        COUNT(CASE WHEN i.estado = 'suspendida' THEN 1 END) as total_pausados
       FROM alumnos a
-      LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id AND i.estado = 'activa'
+      LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id AND i.estado IN ('activa', 'suspendida')
       LEFT JOIN deportes d ON i.deporte_id = d.deporte_id
       WHERE 1=1
     `;
@@ -5023,8 +5164,8 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       JOIN deportes d ON i.deporte_id = d.deporte_id
       LEFT JOIN inscripciones_horarios ih ON i.inscripcion_id = ih.inscripcion_id
       LEFT JOIN horarios h ON ih.horario_id = h.horario_id
-      WHERE i.alumno_id = ? AND i.estado = 'activa'
-      ORDER BY d.nombre, h.dia, h.hora_inicio
+      WHERE i.alumno_id = ? AND i.estado IN ('activa', 'suspendida')
+      ORDER BY i.estado ASC, d.nombre, h.dia, h.hora_inicio
     `, [usuario.alumno_id]);
 
     // Agrupar horarios por inscripción para evitar duplicados en el resumen
@@ -5073,9 +5214,12 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
     });
 
     // Calcular resumen SIN duplicar inscripciones (usar el Map)
+    // Solo contar inscripciones ACTIVAS para el resumen de monto
     const inscripcionesUnicas = Array.from(inscripcionesMap.values());
+    const inscripcionesActivas = inscripcionesUnicas.filter(i => i.estado_inscripcion === 'activa');
+    const inscripcionesSuspendidas = inscripcionesUnicas.filter(i => i.estado_inscripcion === 'suspendida');
     const diasActivos = new Set();
-    inscripcionesUnicas.forEach(ins => {
+    inscripcionesActivas.forEach(ins => {
       ins.horarios.forEach(h => diasActivos.add(h.dia));
     });
 
@@ -5091,10 +5235,11 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       alumno: usuario, // Cambiar "usuario" a "alumno" para consistencia con Google Sheets
       inscripciones, // Array expandido para mostrar cada horario
       resumen: {
-        total_inscripciones: inscripcionesUnicas.length, // Contar inscripciones únicas
-        deportes_distintos: new Set(inscripcionesUnicas.map(i => i.deporte)).size,
+        total_inscripciones: inscripcionesActivas.length, // Solo activas
+        total_suspendidas: inscripcionesSuspendidas.length, // Suspendidas aparte
+        deportes_distintos: new Set(inscripcionesActivas.map(i => i.deporte)).size,
         dias_activos: diasActivos.size,
-        monto_total: inscripcionesUnicas.reduce((sum, i) => sum + (parseFloat(i.precio) || 0), 0) // Sumar precio solo una vez por inscripción
+        monto_total: inscripcionesActivas.reduce((sum, i) => sum + (parseFloat(i.precio) || 0), 0) // Solo sumar activas
       }
     };
 
@@ -5146,11 +5291,11 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
       WHERE dni = ?
     `, [monto_pago || null, numero_operacion || null, notas || null, dni]);
 
-    // Activar todas las inscripciones del alumno en MySQL
+    // Activar todas las inscripciones del alumno en MySQL (pendientes o canceladas)
     await db.query(`
       UPDATE inscripciones 
       SET estado = 'activa', updated_at = NOW()
-      WHERE alumno_id = ? AND estado = 'pendiente'
+      WHERE alumno_id = ? AND estado IN ('pendiente', 'cancelada')
     `, [alumno.alumno_id]);
 
     // Obtener inscripciones activadas
@@ -5197,7 +5342,11 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
 
     // ==================== INVALIDAR CACHÉ ====================
     invalidateDNICache(dni);
-    console.log(`🗑️ Caché invalidado para DNI ${dni}`);
+    
+    // Invalidar caché de lista de inscritos (para dashboard)
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    inscritosKeys.forEach(key => cache.del(key));
+    console.log(`🗑️ Caché invalidado para DNI ${dni} y lista de inscritos (${inscritosKeys.length} claves)`);
 
     res.json({
       success: true,
@@ -5242,16 +5391,20 @@ app.put('/api/admin/inscripciones/:dni/rechazar-pago', async (req, res) => {
       WHERE dni = ?
     `, [motivo || 'Pago rechazado por administrador', dni]);
 
-    // Desactivar inscripciones
+    // Desactivar inscripciones (cambiar a 'cancelada' cuando se rechaza el pago)
     await db.query(`
       UPDATE inscripciones 
-      SET estado = 'inactivo', updated_at = NOW()
+      SET estado = 'cancelada', updated_at = NOW()
       WHERE alumno_id = ?
     `, [alumno.alumno_id]);
 
     // Invalidar caché
     invalidateDNICache(dni);
-    console.log(`🗑️ Caché invalidado para DNI ${dni} (pago rechazado)`);
+    
+    // Invalidar caché de lista de inscritos (para dashboard)
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    inscritosKeys.forEach(key => cache.del(key));
+    console.log(`🗑️ Caché invalidado para DNI ${dni} y lista de inscritos (${inscritosKeys.length} claves)`);
 
     res.json({
       success: true,
@@ -5425,6 +5578,326 @@ app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ==================== ENDPOINTS REUBICACIONES (DRAG & DROP) ====================
+
+/**
+ * GET /api/admin/reubicaciones/deportes
+ * Lista de deportes con sus categorías para el board de reubicaciones
+ */
+app.get('/api/admin/reubicaciones/deportes', async (req, res) => {
+  try {
+    // Obtener deportes activos
+    const [deportes] = await db.query(`
+      SELECT DISTINCT 
+        d.deporte_id,
+        d.nombre,
+        d.icono
+      FROM deportes d
+      JOIN horarios h ON d.deporte_id = h.deporte_id
+      WHERE d.estado = 'activo' AND h.estado = 'activo'
+      ORDER BY d.nombre
+    `);
+
+    // Para cada deporte, obtener sus categorías disponibles
+    const deportesConCategorias = await Promise.all(deportes.map(async (deporte) => {
+      const [categorias] = await db.query(`
+        SELECT DISTINCT categoria
+        FROM horarios
+        WHERE deporte_id = ? AND estado = 'activo' AND categoria IS NOT NULL
+        ORDER BY categoria
+      `, [deporte.deporte_id]);
+
+      return {
+        ...deporte,
+        categorias: categorias.map(c => c.categoria)
+      };
+    }));
+
+    res.json({
+      success: true,
+      deportes: deportesConCategorias.filter(d => d.categorias.length > 0)
+    });
+
+  } catch (error) {
+    console.error('Error al obtener deportes para reubicaciones:', error);
+    res.status(500).json({ success: false, error: 'Error interno del servidor' });
+  }
+});
+
+/**
+ * GET /api/admin/reubicaciones/alumnos/:deporteId
+ * Obtener alumnos agrupados por categoría para un deporte específico
+ */
+app.get('/api/admin/reubicaciones/alumnos/:deporteId', async (req, res) => {
+  try {
+    const { deporteId } = req.params;
+
+    // Obtener todas las categorías del deporte
+    const [categorias] = await db.query(`
+      SELECT DISTINCT categoria
+      FROM horarios
+      WHERE deporte_id = ? AND estado = 'activo' AND categoria IS NOT NULL
+      ORDER BY categoria
+    `, [deporteId]);
+
+    // Obtener alumnos por categoría
+    const resultado = await Promise.all(categorias.map(async (cat) => {
+      const [alumnos] = await db.query(`
+        SELECT DISTINCT
+          a.alumno_id,
+          a.dni,
+          a.nombres,
+          CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos,
+          a.foto_carnet_url,
+          TIMESTAMPDIFF(YEAR, a.fecha_nacimiento, CURDATE()) as edad,
+          i.inscripcion_id,
+          i.estado as estado_inscripcion,
+          GROUP_CONCAT(DISTINCT h.dia ORDER BY FIELD(h.dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO') SEPARATOR ', ') as dias,
+          h.categoria,
+          h.nivel
+        FROM alumnos a
+        JOIN inscripciones i ON a.alumno_id = i.alumno_id
+        JOIN inscripciones_horarios ih ON i.inscripcion_id = ih.inscripcion_id
+        JOIN horarios h ON ih.horario_id = h.horario_id
+        WHERE i.deporte_id = ?
+          AND h.categoria = ?
+          AND i.estado IN ('activa', 'suspendida')
+        GROUP BY a.alumno_id, i.inscripcion_id, h.categoria, h.nivel
+        ORDER BY a.apellido_paterno, a.nombres
+      `, [deporteId, cat.categoria]);
+
+      return {
+        categoria: cat.categoria,
+        alumnos: alumnos.map(alumno => ({
+          ...alumno,
+          foto_url: alumno.foto_carnet_url ? convertirUrlGoogleDrive(alumno.foto_carnet_url) : null
+        }))
+      };
+    }));
+
+    // Obtener nombre del deporte
+    const [[deporte]] = await db.query('SELECT nombre, icono FROM deportes WHERE deporte_id = ?', [deporteId]);
+
+    res.json({
+      success: true,
+      deporte: deporte?.nombre || 'Deporte',
+      icono: deporte?.icono || 'sports',
+      categorias: resultado
+    });
+
+  } catch (error) {
+    console.error('Error al obtener alumnos para reubicaciones:', error);
+    res.status(500).json({ success: false, error: 'Error interno del servidor' });
+  }
+});
+
+/**
+ * GET /api/admin/reubicaciones/preview
+ * Preview de la reubicación - muestra días actuales vs días nuevos Y precios
+ */
+app.get('/api/admin/reubicaciones/preview', async (req, res) => {
+  try {
+    const { inscripcionId, categoriaDestino, deporteId } = req.query;
+
+    if (!inscripcionId || !categoriaDestino || !deporteId) {
+      return res.status(400).json({ success: false, error: 'Faltan parámetros' });
+    }
+
+    // Obtener datos actuales de la inscripción (precio y plan)
+    const [[inscripcionActual]] = await db.query(`
+      SELECT i.precio_mensual, i.plan
+      FROM inscripciones i
+      WHERE i.inscripcion_id = ?
+    `, [inscripcionId]);
+
+    // Obtener días actuales del alumno
+    const [horariosActuales] = await db.query(`
+      SELECT DISTINCT h.dia, TIME_FORMAT(h.hora_inicio, '%H:%i') as hora_inicio, 
+             TIME_FORMAT(h.hora_fin, '%H:%i') as hora_fin, h.categoria
+      FROM inscripciones_horarios ih
+      JOIN horarios h ON ih.horario_id = h.horario_id
+      WHERE ih.inscripcion_id = ?
+      ORDER BY FIELD(h.dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO')
+    `, [inscripcionId]);
+
+    // Obtener horarios disponibles en categoría destino (con precio y plan)
+    const [horariosDestino] = await db.query(`
+      SELECT DISTINCT dia, TIME_FORMAT(hora_inicio, '%H:%i') as hora_inicio, 
+             TIME_FORMAT(hora_fin, '%H:%i') as hora_fin, precio, plan
+      FROM horarios
+      WHERE deporte_id = ? AND categoria = ? AND estado = 'activo'
+      ORDER BY FIELD(dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO')
+    `, [deporteId, categoriaDestino]);
+
+    // El precio nuevo será el del primer horario de la categoría destino
+    const precioNuevo = horariosDestino[0]?.precio || 0;
+    const planNuevo = horariosDestino[0]?.plan || 'Económico';
+    const precioActual = parseFloat(inscripcionActual?.precio_mensual) || 0;
+    const planActual = inscripcionActual?.plan || 'Económico';
+
+    res.json({
+      success: true,
+      diasActuales: horariosActuales.map(h => `${h.dia} ${h.hora_inicio}-${h.hora_fin}`),
+      diasNuevos: horariosDestino.map(h => `${h.dia} ${h.hora_inicio}-${h.hora_fin}`),
+      categoriaActual: horariosActuales[0]?.categoria || 'N/A',
+      precioActual: precioActual,
+      precioNuevo: parseFloat(precioNuevo),
+      planActual: planActual,
+      planNuevo: planNuevo,
+      precioCambia: precioActual !== parseFloat(precioNuevo)
+    });
+
+  } catch (error) {
+    console.error('Error en preview reubicación:', error);
+    res.status(500).json({ success: false, error: 'Error interno' });
+  }
+});
+
+/**
+ * PUT /api/admin/reubicaciones/mover
+ * Mover un alumno de una categoría a otra dentro del mismo deporte
+ * NOTA: Asigna TODOS los horarios de la categoría destino (los días pueden cambiar)
+ */
+app.put('/api/admin/reubicaciones/mover', async (req, res) => {
+  try {
+    const { inscripcionId, categoriaOrigen, categoriaDestino, deporteId } = req.body;
+
+    if (!inscripcionId || !categoriaOrigen || !categoriaDestino || !deporteId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Faltan parámetros requeridos'
+      });
+    }
+
+    if (categoriaOrigen === categoriaDestino) {
+      return res.json({ success: true, message: 'Sin cambios (misma categoría)' });
+    }
+
+    // Obtener los horarios actuales del alumno en la categoría origen
+    const [horariosActuales] = await db.query(`
+      SELECT DISTINCT h.dia, h.hora_inicio, h.hora_fin, ih.inscripcion_horario_id, h.horario_id
+      FROM inscripciones_horarios ih
+      JOIN horarios h ON ih.horario_id = h.horario_id
+      WHERE ih.inscripcion_id = ? AND h.categoria = ?
+    `, [inscripcionId, categoriaOrigen]);
+
+    if (horariosActuales.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No se encontraron horarios para esta inscripción en la categoría origen'
+      });
+    }
+
+    // Obtener TODOS los horarios de la categoría destino (no solo los mismos días)
+    const [horariosNuevos] = await db.query(`
+      SELECT horario_id, dia, hora_inicio, hora_fin, precio, plan
+      FROM horarios
+      WHERE deporte_id = ? 
+        AND categoria = ?
+        AND estado = 'activo'
+    `, [deporteId, categoriaDestino]);
+
+    if (horariosNuevos.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: `No hay horarios disponibles en la categoría "${categoriaDestino}"`
+      });
+    }
+
+    const diasActuales = [...new Set(horariosActuales.map(h => h.dia))].sort();
+    const diasNuevos = [...new Set(horariosNuevos.map(h => h.dia))].sort();
+
+    // Iniciar transacción
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // Eliminar TODOS los horarios actuales de la categoría origen
+      for (const horario of horariosActuales) {
+        await connection.query(
+          'DELETE FROM inscripciones_horarios WHERE inscripcion_horario_id = ?',
+          [horario.inscripcion_horario_id]
+        );
+        // Decrementar cupos del horario antiguo
+        await connection.query(
+          'UPDATE horarios SET cupos_ocupados = GREATEST(0, cupos_ocupados - 1) WHERE horario_id = ?',
+          [horario.horario_id]
+        );
+      }
+
+      // Agregar TODOS los horarios de la categoría destino
+      for (const horarioNuevo of horariosNuevos) {
+        await connection.query(
+          'INSERT INTO inscripciones_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
+          [inscripcionId, horarioNuevo.horario_id]
+        );
+        // Incrementar cupos del nuevo horario
+        await connection.query(
+          'UPDATE horarios SET cupos_ocupados = cupos_ocupados + 1 WHERE horario_id = ?',
+          [horarioNuevo.horario_id]
+        );
+      }
+
+      // Obtener el precio y plan del nuevo horario
+      const precioNuevo = horariosNuevos[0]?.precio || 0;
+      const planNuevo = horariosNuevos[0]?.plan || 'Económico';
+
+      // Registrar la reubicación en observaciones y ACTUALIZAR PRECIO/PLAN
+      const fechaHoy = new Date().toISOString().split('T')[0];
+      await connection.query(`
+        UPDATE inscripciones 
+        SET precio_mensual = ?,
+            plan = ?,
+            observaciones = CONCAT(IFNULL(observaciones, ''), '\n[${fechaHoy}] Reubicado de "${categoriaOrigen}" a "${categoriaDestino}" - Nuevo precio: S/${precioNuevo}')
+        WHERE inscripcion_id = ?
+      `, [precioNuevo, planNuevo, inscripcionId]);
+
+      await connection.commit();
+
+      // Invalidar caché relacionado
+      cache.del(`consulta_dni_*`);
+
+      // Obtener datos del alumno para el log
+      const [[alumno]] = await db.query(`
+        SELECT a.nombres, a.apellido_paterno, a.dni
+        FROM alumnos a
+        JOIN inscripciones i ON a.alumno_id = i.alumno_id
+        WHERE i.inscripcion_id = ?
+      `, [inscripcionId]);
+
+      console.log(`✅ Reubicación exitosa: ${alumno?.nombres} ${alumno?.apellido_paterno} (${alumno?.dni}) movido de "${categoriaOrigen}" a "${categoriaDestino}"`);
+      console.log(`   Días: ${diasActuales.join(', ')} → ${diasNuevos.join(', ')}`);
+
+      res.json({
+        success: true,
+        message: `Alumno reubicado exitosamente de "${categoriaOrigen}" a "${categoriaDestino}"`,
+        alumno: alumno?.nombres + ' ' + alumno?.apellido_paterno,
+        diasReasignados: horariosNuevos.map(h => h.dia)
+      });
+
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+  } catch (error) {
+    console.error('Error al reubicar alumno:', error);
+    res.status(500).json({ success: false, error: 'Error interno del servidor' });
+  }
+});
+
+// Helper para convertir URLs de Google Drive (ya existe pero lo defino si no está disponible aquí)
+function convertirUrlGoogleDrive(url) {
+  if (!url) return null;
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) {
+    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`;
+  }
+  return url;
+}
 
 // Manejo de errores no capturados
 process.on('uncaughtException', (error) => {
