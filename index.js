@@ -642,7 +642,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }).then(r => r.json()),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 30 segundos')), 30000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 60 segundos')), 60000))
       ]);
 
       if (appsScriptResponse.success) {
