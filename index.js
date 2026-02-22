@@ -5742,9 +5742,9 @@ app.delete('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, as
     await db.execute('DELETE FROM inscripciones WHERE alumno_id = ?', [alumnoId]);
     await db.execute('DELETE FROM asistencias WHERE alumno_id = ?', [alumnoId]);
     await db.execute('DELETE FROM ranking_puntos WHERE alumno_id = ?', [alumnoId]);
-    await db.execute('DELETE FROM pagos_mensuales WHERE alumno_id = ?', [alumnoId]);
-    await db.execute('DELETE FROM puntajes_alumnos WHERE alumno_id = ?', [alumnoId]);
-    await db.execute('DELETE FROM alumnos_del_mes WHERE alumno_id = ?', [alumnoId]);
+    try { await db.execute('DELETE FROM pagos_mensuales WHERE alumno_id = ?', [alumnoId]); } catch(e) { console.warn('pagos_mensuales no existe, omitiendo:', e.message); }
+    try { await db.execute('DELETE FROM puntajes_alumnos WHERE alumno_id = ?', [alumnoId]); } catch(e) { console.warn('puntajes_alumnos no existe, omitiendo:', e.message); }
+    try { await db.execute('DELETE FROM alumnos_del_mes WHERE alumno_id = ?', [alumnoId]); } catch(e) { console.warn('alumnos_del_mes no existe, omitiendo:', e.message); }
     await db.execute('DELETE FROM alumnos WHERE alumno_id = ?', [alumnoId]);
 
     // Limpiar caché
