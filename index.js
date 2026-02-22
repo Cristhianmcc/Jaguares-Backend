@@ -1782,6 +1782,27 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
 });
 
 /**
+ * GET /api/configuracion/matricula_activa
+ * Endpoint público para que el frontend verifique si se cobra matrícula
+ */
+app.get('/api/configuracion/matricula_activa', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT valor FROM configuracion WHERE clave = 'matricula_activa' LIMIT 1"
+    );
+    let activa = true;
+    if (rows.length > 0) {
+      const v = rows[0].valor;
+      activa = (v === 'true' || v === true || v === 1 || v === '1');
+    }
+    res.json({ success: true, valor: activa });
+  } catch (error) {
+    console.error('Error al obtener matricula_activa:', error);
+    res.json({ success: true, valor: true }); // Por defecto activa si hay error
+  }
+});
+
+/**
  * GET /api/admin/configuracion
  * Obtener todas las configuraciones del sistema
  */
