@@ -6,7 +6,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:security": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/security.test.js",
+    "test:public": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/public.test.js"
   },
   "keywords": [
     "api",
@@ -26,9 +30,11 @@
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.16.1",
     "node-cache": "^5.1.2",
-    "react-joyride": "^2.9.3"
+    "react-joyride": "^2.9.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/react-joyride": "^2.0.2"
+    "@types/react-joyride": "^2.0.2",
+    "jest": "^29.7.0"
   }
 }

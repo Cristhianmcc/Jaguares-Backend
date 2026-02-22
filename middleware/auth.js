@@ -37,6 +37,14 @@ export const verificarAutenticacion = (req, res, next) => {
         // Agregar información del usuario al request
         req.user = decoded;
         
+        // También setear req.admin para compatibilidad con endpoints de profesor
+        req.admin = {
+            admin_id: decoded.administrador_id || decoded.id,
+            usuario: decoded.username,
+            nombre_completo: decoded.nombre_completo,
+            rol: decoded.rol || decoded.role
+        };
+        
         next();
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
@@ -94,7 +102,7 @@ export const generarToken = (usuario) => {
         id: usuario.administrador_id,
         username: usuario.username,
         role: 'admin',
-        nombre: usuario.nombre_completo,
+        nombre_completo: usuario.nombre_completo,
         rol: usuario.rol || 'admin'
     };
 
