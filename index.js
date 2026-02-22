@@ -2877,20 +2877,6 @@ app.get('/api/admin/horarios-disponibles', verificarAutenticacion, verificarAdmi
     }
 });
 
-// GET /api/admin/categorias?deporte_id=X  — categorías distintas de un deporte
-app.get('/api/admin/categorias', verificarAutenticacion, verificarAdmin, async (req, res) => {
-    try {
-        const { deporte_id } = req.query;
-        const params = [];
-        let where = '';
-        if (deporte_id) { where = 'WHERE deporte_id = ?'; params.push(deporte_id); }
-        const [rows] = await db.query(`SELECT DISTINCT categoria FROM horarios ${where} ORDER BY categoria`, params);
-        res.json({ success: true, categorias: rows.map(r => r.categoria) });
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Error al obtener categorías' });
-    }
-});
-
 // GET /api/admin/dias?deporte_id=X&categoria=Y  — días distintos para deporte+categoría
 app.get('/api/admin/dias', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
