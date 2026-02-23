@@ -4659,20 +4659,19 @@ app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdm
     if (actual.dia && actual.hora_inicio) {
       // Si hay más horarios actuales, obtenerlos
       const [todosHorariosActuales] = await db.query(`
-        SELECT h.dia, h.hora_inicio 
+        SELECT h.dia, h.hora_inicio, h.hora_fin 
         FROM inscripcion_horarios ih
         INNER JOIN horarios h ON ih.horario_id = h.horario_id
         WHERE ih.inscripcion_id = ?
         ORDER BY FIELD(h.dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO')
       `, [inscripcionId]);
       
-      diasActuales = todosHorariosActuales.map(h => `${h.dia} ${h.hora_inicio}`);
+      diasActuales = todosHorariosActuales.map(h => `${h.dia} ${h.hora_inicio} - ${h.hora_fin}`);
     }
 
-    // El nuevo horario será el PRIMERO disponible (solo uno, no todos)
-    // Si hay más de un horario disponible, mostrar solo el que se asignará
+    // La nueva categoría asigna TODOS sus horarios activos al alumno
     const diasNuevos = horariosDestino.length > 0 
-      ? [`${horariosDestino[0].dia} ${horariosDestino[0].hora_inicio}`]
+      ? horariosDestino.map(h => `${h.dia} ${h.hora_inicio} - ${h.hora_fin}`)
       : ['No hay horarios disponibles'];
 
     res.json({
@@ -4718,49 +4717,28 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
     }
 
-    // Obtener horario actual si existe
-    const [horarioActual] = await connection.query(`
+    // Obtener TODOS los días actuales del alumno en esta inscripción
+    const [horariosActualesInfo] = await connection.query(`
       SELECT ih.horario_id, h.dia 
       FROM inscripcion_horarios ih
       INNER JOIN horarios h ON ih.horario_id = h.horario_id
       WHERE ih.inscripcion_id = ? AND h.deporte_id = ?
-      LIMIT 1
+      ORDER BY FIELD(h.dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO')
     `, [inscripcionId, deporteId]);
 
-    const tieneHorarioActual = horarioActual.length > 0;
-    const diaActual = tieneHorarioActual ? horarioActual[0].dia : null;
+    const diasActualesMover = horariosActualesInfo.map(h => h.dia);
 
-    // Buscar horario en categoría destino (preferir el mismo día si existe)
-    let horarioDestino;
-    
-    if (diaActual) {
-      // Intentar encontrar horario del mismo día
-      [horarioDestino] = await connection.query(`
-        SELECT horario_id, cupo_maximo, cupos_ocupados, (cupo_maximo - cupos_ocupados) as cupo_disponible, precio, dia, hora_inicio
-        FROM horarios
-        WHERE deporte_id = ? 
-          AND categoria = ?
-          AND dia = ?
-          AND estado = 'activo'
-        LIMIT 1
-      `, [deporteId, categoriaDestino, diaActual]);
-    }
-    
-    // Si no hay horario del mismo día, buscar cualquiera disponible
-    if (!horarioDestino || horarioDestino.length === 0) {
-      [horarioDestino] = await connection.query(`
-        SELECT horario_id, cupo_maximo, cupos_ocupados, (cupo_maximo - cupos_ocupados) as cupo_disponible, precio, dia, hora_inicio
-        FROM horarios
-        WHERE deporte_id = ? 
-          AND categoria = ?
-          AND estado = 'activo'
-          AND (cupo_maximo - cupos_ocupados) > 0
-        ORDER BY FIELD(dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO')
-        LIMIT 1
-      `, [deporteId, categoriaDestino]);
-    }
+    // Obtener TODOS los horarios activos de la categoría destino
+    const [todosHorariosDestino] = await connection.query(`
+      SELECT horario_id, cupo_maximo, cupos_ocupados, (cupo_maximo - cupos_ocupados) as cupo_disponible, precio, dia, hora_inicio
+      FROM horarios
+      WHERE deporte_id = ? 
+        AND categoria = ?
+        AND estado = 'activo'
+      ORDER BY FIELD(dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO')
+    `, [deporteId, categoriaDestino]);
 
-    if (!horarioDestino || horarioDestino.length === 0) {
+    if (!todosHorariosDestino || todosHorariosDestino.length === 0) {
       await connection.rollback();
       return res.status(400).json({ 
         success: false, 
@@ -4768,15 +4746,18 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       });
     }
 
-    if (horarioDestino[0].cupo_disponible <= 0) {
+    // Asignar TODOS los horarios de la categoría destino (independientemente de los días actuales)
+    const horariosAsignados = todosHorariosDestino.filter(h => h.cupo_disponible > 0);
+
+    if (horariosAsignados.length === 0) {
       await connection.rollback();
       return res.status(400).json({ 
         success: false, 
-        error: 'No hay cupos disponibles en el horario de destino' 
+        error: `No hay cupos disponibles en la categoría ${categoriaDestino}` 
       });
     }
 
-    const nuevoPrecio = horarioDestino[0].precio;
+    const nuevoPrecio = horariosAsignados[0].precio;
 
     // Obtener TODOS los horarios actuales de esta inscripción para este deporte
     const [todosHorariosActuales] = await connection.query(`
@@ -4803,17 +4784,17 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       );
     }
 
-    // Ocupar cupo en el nuevo horario (incrementar cupos_ocupados)
-    await connection.query(
-      'UPDATE horarios SET cupos_ocupados = cupos_ocupados + 1 WHERE horario_id = ?',
-      [horarioDestino[0].horario_id]
-    );
-
-    // Insertar el nuevo horario (solo UNO)
-    await connection.query(
-      'INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
-      [inscripcionId, horarioDestino[0].horario_id]
-    );
+    // Ocupar cupos e insertar TODOS los nuevos horarios asignados
+    for (const horario of horariosAsignados) {
+      await connection.query(
+        'UPDATE horarios SET cupos_ocupados = cupos_ocupados + 1 WHERE horario_id = ?',
+        [horario.horario_id]
+      );
+      await connection.query(
+        'INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
+        [inscripcionId, horario.horario_id]
+      );
+    }
 
     // Actualizar el precio de la inscripción
     if (nuevoPrecio) {
@@ -6415,7 +6396,7 @@ app.put('/api/admin/inscripciones/:dni/rechazar-pago', async (req, res) => {
     // Desactivar inscripciones
     await db.query(`
       UPDATE inscripciones 
-      SET estado = 'inactivo', updated_at = NOW()
+      SET estado = 'pendiente', updated_at = NOW()
       WHERE alumno_id = ?
     `, [alumno.alumno_id]);
     
@@ -6675,11 +6656,12 @@ app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
       ORDER BY total_inscripciones DESC
     `);
     
-    // Ingresos
+    // Ingresos: suma de precio_mensual de inscripciones activas de alumnos confirmados
     const [[{ ingresos_confirmados }]] = await db.query(`
-      SELECT COALESCE(SUM(monto_pago), 0) as ingresos_confirmados
-      FROM alumnos
-      WHERE estado_pago = 'confirmado'
+      SELECT COALESCE(SUM(i.precio_mensual), 0) as ingresos_confirmados
+      FROM inscripciones i
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      WHERE i.estado = 'activa' AND a.estado_pago = 'confirmado'
     `);
     
     res.json({
