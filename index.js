@@ -632,114 +632,6 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       }
     }
     
-    // ==================== SINCRONIZAR CON APPS SCRIPT (BLOQUEANTE - DEBE COMPLETARSE) ====================
-    // Enviar a Apps Script y ESPERAR respuesta (timeout 30 segundos)
-    const payload = {
-      token: APPS_SCRIPT_TOKEN,
-      action: 'inscribir_multiple',
-      codigo_operacion: codigoOperacion, // Enviar el código generado por MySQL
-      alumno,
-      horarios
-    };
-    
-    console.log('📤 Enviando a Apps Script (Google Sheets)...');
-    
-    try {
-      const appsScriptResponse = await Promise.race([
-        fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        }).then(r => r.json()),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 30 segundos')), 30000))
-      ]);
-      
-      if (appsScriptResponse.success) {
-        console.log('✅ Apps Script sync exitoso - Datos guardados en Google Sheets');
-        
-        // Actualizar URLs de documentos si están disponibles
-        if (appsScriptResponse.urls_documentos && inscripcionData) {
-          await db.query(
-            `UPDATE alumnos SET 
-             dni_frontal_url = ?, 
-             dni_reverso_url = ?, 
-             foto_carnet_url = ?,
-             comprobante_pago_url = ?
-             WHERE alumno_id = ?`,
-            [
-              appsScriptResponse.urls_documentos.dni_frontal,
-              appsScriptResponse.urls_documentos.dni_reverso,
-              appsScriptResponse.urls_documentos.foto_carnet,
-              appsScriptResponse.url_comprobante,
-              inscripcionData.alumnoId
-            ]
-          );
-          console.log('✅ URLs de documentos actualizadas en MySQL');
-        }
-      } else {
-        console.error('❌ Apps Script retornó error:', appsScriptResponse.error);
-        
-        // ROLLBACK: Eliminar datos de MySQL porque Apps Script falló
-        console.log('🔄 ROLLBACK: Eliminando datos de MySQL...');
-        
-        try {
-          // Eliminar inscripciones creadas
-          if (inscripcionData && inscripcionData.inscripcionIds) {
-            const inscripcionIds = inscripcionData.inscripcionIds.map(i => i.inscripcionId);
-            await db.query(
-              `DELETE FROM inscripciones WHERE inscripcion_id IN (${inscripcionIds.join(',')})`,
-            );
-            console.log(`✅ Eliminadas ${inscripcionIds.length} inscripciones`);
-          }
-          
-          // Eliminar alumno si se creó nuevo
-          if (inscripcionData && inscripcionData.alumnoCreado) {
-            await db.query('DELETE FROM alumnos WHERE alumno_id = ?', [inscripcionData.alumnoId]);
-            console.log(`✅ Eliminado alumno ID ${inscripcionData.alumnoId}`);
-          }
-        } catch (rollbackErr) {
-          console.error('❌ Error en rollback:', rollbackErr);
-        }
-        
-        return res.status(500).json({
-          success: false,
-          error: 'Error al procesar inscripción',
-          message: appsScriptResponse.error || 'No se pudo completar la inscripción. Por favor, intenta nuevamente.',
-          detalles: appsScriptResponse.error && appsScriptResponse.error.includes('Ya estás inscrito') ? 'DUPLICADO' : null
-        });
-      }
-    } catch (err) {
-      console.error('❌ ERROR CRÍTICO: Apps Script falló:', err.message);
-      
-      // ROLLBACK: Eliminar datos de MySQL porque Apps Script falló
-      console.log('🔄 ROLLBACK: Eliminando datos de MySQL...');
-      
-      try {
-        // Eliminar inscripciones creadas
-        if (inscripcionData && inscripcionData.inscripcionIds) {
-          const inscripcionIds = inscripcionData.inscripcionIds.map(i => i.inscripcionId);
-          await db.query(
-            `DELETE FROM inscripciones WHERE inscripcion_id IN (${inscripcionIds.join(',')})`,
-          );
-          console.log(`✅ Eliminadas ${inscripcionIds.length} inscripciones`);
-        }
-        
-        // Eliminar alumno si se creó nuevo
-        if (inscripcionData && inscripcionData.alumnoCreado) {
-          await db.query('DELETE FROM alumnos WHERE alumno_id = ?', [inscripcionData.alumnoId]);
-          console.log(`✅ Eliminado alumno ID ${inscripcionData.alumnoId}`);
-        }
-      } catch (rollbackErr) {
-        console.error('❌ Error en rollback:', rollbackErr);
-      }
-      
-      return res.status(500).json({
-        success: false,
-        error: 'Error al procesar inscripción',
-        message: 'No se pudo completar la inscripción debido a un error de conexión con Google Sheets. Por favor, intenta nuevamente en unos momentos.'
-      });
-    }
-    
     // INVALIDAR CACHÉ
     const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
@@ -749,6 +641,60 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       invalidateDNICache(alumno.dni);
     }
     console.log('🗑️ CACHÉ INVALIDADO');
+
+    // ==================== SINCRONIZAR CON APPS SCRIPT EN BACKGROUND (NO BLOQUEANTE) ====================
+    // Disparar la sincronización en background sin bloquear la respuesta al usuario
+    setImmediate(() => {
+      const payload = {
+        token: APPS_SCRIPT_TOKEN,
+        action: 'inscribir_multiple',
+        codigo_operacion: codigoOperacion,
+        alumno,
+        horarios
+      };
+      console.log('📤 [BG] Enviando a Apps Script en background...');
+      Promise.race([
+        fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(r => r.json()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5min')), 300000))
+      ])
+      .then(async (appsScriptResponse) => {
+        if (appsScriptResponse.success) {
+          console.log('✅ [BG] Apps Script sync exitoso - Datos en Google Sheets');
+          // Actualizar URLs de documentos si están disponibles
+          if (appsScriptResponse.urls_documentos && inscripcionData && db) {
+            try {
+              await db.query(
+                `UPDATE alumnos SET 
+                 dni_frontal_url = ?, 
+                 dni_reverso_url = ?, 
+                 foto_carnet_url = ?,
+                 comprobante_pago_url = ?
+                 WHERE alumno_id = ?`,
+                [
+                  appsScriptResponse.urls_documentos.dni_frontal,
+                  appsScriptResponse.urls_documentos.dni_reverso,
+                  appsScriptResponse.urls_documentos.foto_carnet,
+                  appsScriptResponse.url_comprobante,
+                  inscripcionData.alumnoId
+                ]
+              );
+              console.log('✅ [BG] URLs de documentos actualizadas en MySQL');
+            } catch (e) {
+              console.error('❌ [BG] Error actualizando URLs:', e.message);
+            }
+          }
+        } else {
+          console.error('❌ [BG] Apps Script retornó error (inscripción ya guardada en MySQL):', appsScriptResponse.error);
+        }
+      })
+      .catch(err => {
+        console.error('❌ [BG] Apps Script falló (inscripción ya guardada en MySQL):', err.message);
+      });
+    });
     
     // Responder inmediatamente con éxito de MySQL (formato compatible con tests)
     res.json({
@@ -1324,37 +1270,74 @@ app.post('/api/subir-comprobante', async (req, res) => {
     }
     
     console.log(`📸 Subiendo comprobante para DNI ${dni}, código: ${codigo_operacion}`);
-    
-    // Reenviar al Apps Script
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        token: APPS_SCRIPT_TOKEN,
-        action: 'subir_comprobante',
-        codigo_operacion,
-        dni,
-        alumno,
-        imagen,
-        nombre_archivo
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok || !data.success) {
-      console.error('❌ Error del Apps Script:', data.error);
-      return res.status(response.status || 500).json(data);
+
+    // Validar que el código existe en MySQL (no depender del Sheet)
+    if (db) {
+      const [rows] = await db.query(
+        `SELECT i.inscripcion_id FROM inscripciones i
+         JOIN alumnos a ON i.alumno_id = a.alumno_id
+         WHERE i.codigo_operacion = ? AND a.dni = ? LIMIT 1`,
+        [codigo_operacion, dni]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Código de operación no encontrado. Verifica tu inscripción.'
+        });
+      }
+      // Marcar en MySQL que el comprobante fue recibido (pendiente de subir a Drive)
+      await db.query(
+        `UPDATE inscripciones SET estado = 'pendiente' 
+         WHERE codigo_operacion = ? AND estado = 'pendiente'`,
+        [codigo_operacion]
+      );
     }
-    
-    console.log('✅ Comprobante subido exitosamente:', data.url_comprobante);
-    
-    // Invalidar caché de consulta para este DNI
+
+    // Invalidar caché inmediatamente
     invalidateDNICache(dni);
-    
-    res.json(data);
+
+    // Responder éxito al usuario de inmediato
+    res.json({
+      success: true,
+      message: 'Comprobante recibido correctamente. Será procesado en breve.',
+      url_comprobante: null
+    });
+
+    // Subir a Apps Script / Google Drive en background
+    setImmediate(() => {
+      console.log(`📤 [BG] Subiendo comprobante a Drive para código: ${codigo_operacion}`);
+      Promise.race([
+        fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: APPS_SCRIPT_TOKEN,
+            action: 'subir_comprobante',
+            codigo_operacion,
+            dni,
+            alumno,
+            imagen,
+            nombre_archivo
+          })
+        }).then(r => r.json()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5min')), 300000))
+      ])
+      .then(async (data) => {
+        if (data.success && data.url_comprobante && db) {
+          await db.query(
+            `UPDATE alumnos SET comprobante_pago_url = ? WHERE dni = ?`,
+            [data.url_comprobante, dni]
+          );
+          console.log(`✅ [BG] Comprobante subido a Drive: ${data.url_comprobante}`);
+        } else {
+          console.error('❌ [BG] Apps Script error al subir comprobante:', data.error);
+        }
+      })
+      .catch(err => {
+        console.error('❌ [BG] Falló subida de comprobante a Drive:', err.message);
+      });
+    });
+
   } catch (error) {
     console.error('❌ Error al subir comprobante:', error);
     res.status(500).json({ 
@@ -5505,7 +5488,7 @@ app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
     if (!db) throw new Error('Base de datos no disponible');
     
     const horarioId = req.params.id;
-    const { categoria, nivel, plan, ano_min, ano_max, hora_inicio, hora_fin, cupo_maximo, precio } = req.body;
+    const { categoria, nivel, plan, ano_min, ano_max, hora_inicio, hora_fin, cupo_maximo, precio, deporte_id, dia, genero, estado } = req.body;
     
     // Validar que el cupo máximo no sea menor a los cupos ocupados
     if (cupo_maximo) {
@@ -5561,6 +5544,22 @@ app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
     if (precio !== undefined) {
       updates.push('precio = ?');
       values.push(precio);
+    }
+    if (deporte_id !== undefined) {
+      updates.push('deporte_id = ?');
+      values.push(deporte_id);
+    }
+    if (dia !== undefined) {
+      updates.push('dia = ?');
+      values.push(dia);
+    }
+    if (genero !== undefined) {
+      updates.push('genero = ?');
+      values.push(genero || null);
+    }
+    if (estado !== undefined) {
+      updates.push('estado = ?');
+      values.push(estado);
     }
     
     if (updates.length === 0) {
@@ -5686,6 +5685,49 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
     });
   } catch (error) {
     console.error('Error al eliminar inscripciones:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/alumnos/:dni/asistencias — historial de asistencias de un alumno
+app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { dni } = req.params;
+    const [alumno] = await db.execute(
+      'SELECT alumno_id, nombres, apellido_paterno, apellido_materno FROM alumnos WHERE dni = ?',
+      [dni]
+    );
+    if (alumno.length === 0) return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+
+    const [registros] = await db.execute(`
+      SELECT
+        ast.fecha,
+        ast.presente,
+        ast.observaciones,
+        d.nombre AS deporte,
+        h.dia,
+        h.hora_inicio,
+        h.hora_fin,
+        h.categoria
+      FROM asistencias ast
+      JOIN horarios h ON ast.horario_id = h.horario_id
+      JOIN deportes d ON h.deporte_id = d.deporte_id
+      WHERE ast.alumno_id = ?
+      ORDER BY ast.fecha DESC, d.nombre
+      LIMIT 200
+    `, [alumno[0].alumno_id]);
+
+    const total = registros.length;
+    const presentes = registros.filter(r => r.presente).length;
+
+    res.json({
+      success: true,
+      alumno: { ...alumno[0], dni },
+      asistencias: registros,
+      resumen: { total, presentes, ausentes: total - presentes }
+    });
+  } catch (error) {
+    console.error('Error al obtener asistencias de alumno:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -6676,6 +6718,181 @@ app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
   } catch (error) {
     console.error('Error al obtener estadísticas:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== CHATBOT ADMIN (GROQ) ====================
+
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+const CHAT_SYSTEM_PROMPT = `Eres el asistente de administración de JAGUARES, una academia deportiva en Perú.
+Tu función es ayudar al administrador a consultar información de la base de datos de forma conversacional.
+
+Cuando la pregunta requiera datos de la BD, responde ÚNICAMENTE con un JSON:
+{"tipo": "sql", "query": "SELECT ...", "descripcion": "qué hace el query"}
+
+Si NO necesita datos de la BD, responde con:
+{"tipo": "respuesta", "texto": "tu respuesta aquí"}
+
+REGLAS ESTRICTAS:
+- Solo SELECT, NUNCA INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE
+- No consultar tabla: administradores
+- No mostrar columnas: contrasena, hash_contrasena, password
+- Siempre agregar LIMIT 100 máximo
+- Usa JOINs cuando necesites info de múltiples tablas
+- Los nombres propios de alumnos están en columnas separadas: nombres, apellido_paterno, apellido_materno
+- Para búsqueda por nombre usa LIKE '%valor%' en nombres o apellido_paterno
+
+DEFINICIONES IMPORTANTES (usa SIEMPRE estas definiciones):
+- "inscritos" / "lista de inscritos" / "alumnos inscritos" = alumnos con inscripción estado IN ('activa','pendiente'). Query: SELECT COUNT(DISTINCT a.alumno_id) FROM alumnos a JOIN inscripciones i ON a.alumno_id = i.alumno_id WHERE i.estado IN ('activa','pendiente')
+- "todos los alumnos en el sistema" = SELECT COUNT(*) FROM alumnos (incluye datos históricos/cancelados)
+- "alumnos activos" = alumnos con estado='activo' en tabla alumnos
+- "pagos pendientes" = alumnos con estado_pago='pendiente'
+- Cuando el admin pregunta "cuántos tengo" sin contexto, asume INSCRITOS con estado='activa' o 'pendiente'
+
+FÓRMULAS FINANCIERAS (Dashboard Financiero):
+- "ingresos totales" / "total ingresos" = SUM(matriculas_pagadas) + SUM(precio_mensual) de inscripciones activas:
+  SELECT COALESCE(SUM(CASE WHEN i.matricula_pagada=1 THEN d.matricula ELSE 0 END),0) + COALESCE(SUM(i.precio_mensual),0) as total_ingresos FROM inscripciones i JOIN deportes d ON i.deporte_id=d.deporte_id WHERE i.estado='activa'
+- "ingresos del mes" / "ingresos este mes" = mismo cálculo pero filtrado por MONTH(i.fecha_inscripcion)=MONTH(CURRENT_DATE()) AND YEAR(i.fecha_inscripcion)=YEAR(CURRENT_DATE())
+- "ingresos de hoy" = mismo cálculo con DATE(i.fecha_inscripcion)=CURRENT_DATE()
+- "mensualidades" = SUM(i.precio_mensual) FROM inscripciones WHERE estado='activa'
+- "matrículas cobradas" = SUM(CASE WHEN matricula_pagada=1 THEN d.matricula ELSE 0 END)
+- "ingresos por deporte" = agrupar por d.nombre con SUM de mensualidades + matrículas de inscripciones activas
+- "ingresos por alumno" = agrupar por a.alumno_id con SUM de mensualidades + matrículas, JOIN con alumnos e inscripciones activas
+- "alumnos con más deportes" = COUNT(inscripciones activas) por alumno, ORDER BY cantidad DESC
+
+ESQUEMA DE LA BASE DE DATOS:
+
+alumnos: alumno_id, dni, nombres, apellido_paterno, apellido_materno, fecha_nacimiento, sexo(Masculino/Femenino), telefono, email, estado(activo/inactivo/suspendido), estado_pago(pendiente/confirmado/rechazado), apoderado, telefono_apoderado, created_at
+
+inscripciones: inscripcion_id, alumno_id, deporte_id, estado(pendiente/activa/cancelada/suspendida), plan(Económico/Estándar/Premium), precio_mensual, matricula_pagada(0/1), fecha_inicio, fecha_fin, fecha_inscripcion
+
+deportes: deporte_id, nombre, matricula(precio de matrícula), estado(activo/inactivo)
+
+horarios: horario_id, deporte_id, dia(LUNES/MARTES/MIERCOLES/JUEVES/VIERNES/SABADO/DOMINGO), hora_inicio, hora_fin, cupo_maximo, cupos_ocupados, estado(activo/inactivo/suspendido), categoria, nivel, ano_min, ano_max, genero(Masculino/Femenino/Mixto), precio, plan
+
+profesores: profesor_id, nombres, apellidos, especialidad, estado(activo/inactivo)
+
+profesor_deportes: id, admin_id, deporte_id, categoria, dia, horario_id
+
+asistencias: asistencia_id, alumno_id, horario_id, fecha, presente(0=ausente/1=presente), observaciones
+
+inscripcion_horarios: id, inscripcion_id, horario_id, estado(activo/inactivo)
+
+pagos_mensuales: pago_id, alumno_id, mes, anio, monto, estado(pendiente/confirmado/rechazado)
+
+categorias: categoria_id, deporte_id, nombre, ano_min, ano_max, estado(activo/inactivo)`;
+
+app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { mensaje } = req.body;
+    if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0 || mensaje.length > 600) {
+      return res.status(400).json({ success: false, error: 'Mensaje inválido' });
+    }
+
+    // Paso 1: Groq genera SQL o respuesta directa
+    const groqRes1 = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: CHAT_SYSTEM_PROMPT },
+          { role: 'user', content: mensaje.trim() }
+        ],
+        temperature: 0.1,
+        max_tokens: 800
+      })
+    });
+
+    if (!groqRes1.ok) {
+      const errBody = await groqRes1.text();
+      console.error('❌ Groq API error:', errBody);
+      return res.status(502).json({ success: false, error: 'Error al conectar con el asistente IA' });
+    }
+
+    const groqData1 = await groqRes1.json();
+    const rawText = groqData1.choices?.[0]?.message?.content || '{}';
+
+    let parsed;
+    try {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch?.[0] || '{}');
+    } catch {
+      parsed = { tipo: 'respuesta', texto: rawText };
+    }
+
+    // Respuesta directa sin SQL
+    if (parsed.tipo === 'respuesta') {
+      return res.json({ success: true, respuesta: parsed.texto });
+    }
+
+    // Paso 2: Ejecutar SQL con validaciones de seguridad
+    if (parsed.tipo === 'sql' && parsed.query) {
+      const query = parsed.query.trim();
+
+      const forbiddenKeywords = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|CALL)\b/i;
+      if (forbiddenKeywords.test(query)) {
+        return res.json({ success: true, respuesta: 'Solo puedo realizar consultas de lectura.' });
+      }
+      if (/\badministradores\b/i.test(query)) {
+        return res.json({ success: true, respuesta: 'No tengo acceso a datos de administradores por seguridad.' });
+      }
+      if (!query.toUpperCase().trimStart().startsWith('SELECT')) {
+        return res.json({ success: true, respuesta: 'Solo puedo ejecutar consultas SELECT.' });
+      }
+
+      let resultados;
+      try {
+        const [rows] = await db.execute(query);
+        resultados = rows;
+      } catch (sqlError) {
+        console.error('❌ Chat SQL error:', sqlError.message);
+        return res.json({ success: true, respuesta: `No pude ejecutar esa consulta. Intenta reformular la pregunta.` });
+      }
+
+      if (resultados.length === 0) {
+        return res.json({ success: true, respuesta: 'No encontré registros con esos criterios.' });
+      }
+
+      // Paso 3: Groq formatea los resultados
+      const groqRes2 = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: 'Eres el asistente de JAGUARES academia deportiva. Responde en español de forma clara y concisa. El admin te hizo una pregunta y te doy los datos de la BD. Presenta la info de forma legible: usa listas, resalta números importantes. Sin JSON, solo texto natural.'
+            },
+            {
+              role: 'user',
+              content: `Pregunta del admin: "${mensaje.trim()}"\n\nDatos obtenidos (${resultados.length} registros):\n${JSON.stringify(resultados.slice(0, 100))}`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 600
+        })
+      });
+
+      const groqData2 = await groqRes2.json();
+      const respuestaFinal = groqData2.choices?.[0]?.message?.content || 'No pude formatear la respuesta.';
+
+      return res.json({ success: true, respuesta: respuestaFinal, total: resultados.length });
+    }
+
+    res.json({ success: true, respuesta: 'No pude entender esa consulta. Intenta reformularla.' });
+  } catch (error) {
+    console.error('❌ Error chatbot admin:', error);
+    res.status(500).json({ success: false, error: 'Error interno del chatbot' });
   }
 });
 
