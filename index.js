@@ -39,7 +39,7 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || 'rootpassword123',
   database: process.env.DB_NAME || 'jaguares_db',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 25,
   queueLimit: 0,
   charset: 'utf8mb4'
 };
