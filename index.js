@@ -474,9 +474,16 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         
         // Función para calcular precio
         const calcularPrecio = (cantidadDias, plan, deporte) => {
-          const esMamasFit = deporte === 'MAMAS FIT';
+          // MAMAS FIT: precio fijo S/.60
+          if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
           
-          if (esMamasFit) return 60;
+          // Baby Fútbol: 1d=50, 2d=100, 3d=150
+          if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+            if (cantidadDias === 1) return 50;
+            if (cantidadDias === 2) return 100;
+            if (cantidadDias >= 3) return 150;
+            return 50;
+          }
           
           if (plan === 'Económico') {
             if (cantidadDias === 2) return 60;
@@ -526,6 +533,29 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         console.log(`💳 matricula_activa = ${matriculaActivaVal === 1 ? 'SÍ se cobra' : 'NO se cobra'}`);
         
         // 4. Guardar inscripciones
+        
+        // ♻️ LIMPIAR PENDIENTES PREVIAS: Si el alumno ya tenía inscripciones pendientes
+        // (ej: el usuario volvió atrás desde la confirmación para editar), las eliminamos
+        // para que pueda re-confirmar sin error. Solo bloqueamos las 'activas'.
+        const [pendientesExistentes] = await db.query(
+          `SELECT inscripcion_id FROM inscripciones WHERE alumno_id = ? AND estado = 'pendiente'`,
+          [alumnoId]
+        );
+        if (pendientesExistentes.length > 0) {
+          const idsPendientes = pendientesExistentes.map(r => r.inscripcion_id);
+          console.log(`♻️ Eliminando ${idsPendientes.length} inscripción(es) pendiente(s) previas del alumno ${alumnoId}: [${idsPendientes.join(', ')}]`);
+          // Eliminar horarios asociados primero (FK)
+          await db.query(
+            `DELETE FROM inscripcion_horarios WHERE inscripcion_id IN (${idsPendientes.map(() => '?').join(',')})`,
+            idsPendientes
+          );
+          // Eliminar las inscripciones pendientes
+          await db.query(
+            `DELETE FROM inscripciones WHERE inscripcion_id IN (${idsPendientes.map(() => '?').join(',')})`,
+            idsPendientes
+          );
+        }
+        
         const inscripcionesIds = [];
         for (const [nombreDeporte, info] of Object.entries(deportesMap)) {
           const [deporteRows] = await db.query(
@@ -543,24 +573,23 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           const cantidadDias = info.horarios.length;
           const precioMensual = calcularPrecio(cantidadDias, plan, nombreDeporte);
           
-          // ⚠️ VALIDACIÓN: Verificar si ya existe inscripción activa para este alumno + deporte
-          const [inscripcionExistente] = await db.query(
+          // ⚠️ VALIDACIÓN: Solo bloquear si ya existe inscripción ACTIVA (no pendiente, esas ya se limpiaron)
+          const [inscripcionActiva] = await db.query(
             `SELECT inscripcion_id, estado, plan, precio_mensual 
              FROM inscripciones 
-             WHERE alumno_id = ? AND deporte_id = ? AND estado IN ('activa', 'pendiente')
+             WHERE alumno_id = ? AND deporte_id = ? AND estado = 'activa'
              LIMIT 1`,
             [alumnoId, deporteId]
           );
           
-          if (inscripcionExistente.length > 0) {
-            const inscExist = inscripcionExistente[0];
-            console.warn(`⚠️ DUPLICADO DETECTADO: Alumno ${alumnoId} ya tiene inscripción ${inscExist.estado} en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
+          if (inscripcionActiva.length > 0) {
+            const inscExist = inscripcionActiva[0];
+            console.warn(`⚠️ DUPLICADO ACTIVO: Alumno ${alumnoId} ya tiene inscripción ACTIVA en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
             
-            // Retornar error al cliente
             return res.status(409).json({
               success: false,
               error: 'Inscripción duplicada',
-              message: `Ya existe una inscripción ${inscExist.estado} para ${nombreDeporte}. No se puede inscribir dos veces en el mismo deporte.`,
+              message: `Ya tienes una inscripción activa en ${nombreDeporte}. No puedes inscribirte dos veces en el mismo deporte.`,
               deporte: nombreDeporte,
               inscripcion_existente: {
                 id: inscExist.inscripcion_id,
@@ -5342,6 +5371,167 @@ app.delete('/api/admin/deportes/:id/eliminar-permanente', async (req, res) => {
     }
   } catch (error) {
     console.error('❌ Error al eliminar deporte permanentemente:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== ENDPOINTS PLANES ====================
+
+// GET público (usado por selección de horarios)
+app.get('/api/planes', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [planes] = await db.execute(
+      'SELECT * FROM planes WHERE activo = TRUE ORDER BY orden ASC, plan_id ASC'
+    );
+    res.json({ success: true, planes });
+  } catch (error) {
+    console.error('❌ Error GET /api/planes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET admin
+app.get('/api/admin/planes', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [planes] = await db.execute(
+      'SELECT * FROM planes ORDER BY orden ASC, plan_id ASC'
+    );
+    res.json({ success: true, planes });
+  } catch (error) {
+    console.error('❌ Error GET /api/admin/planes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST crear plan
+app.post('/api/admin/planes', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const { nombre, tipo, precio_1dia, precio_2dias, precio_3dias, precio_fijo, precio_completo, minimo_dias, maximo_dias, descripcion_extra, activo, orden } = req.body;
+    if (!nombre || !tipo) return res.status(400).json({ success: false, error: 'nombre y tipo son requeridos' });
+    const [result] = await db.execute(
+      `INSERT INTO planes (nombre, tipo, precio_1dia, precio_2dias, precio_3dias, precio_fijo, precio_completo, minimo_dias, maximo_dias, descripcion_extra, activo, orden)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [nombre, tipo, precio_1dia||null, precio_2dias||null, precio_3dias||null, precio_fijo||null, precio_completo||null, minimo_dias||2, maximo_dias||3, descripcion_extra||null, activo!==false, orden||0]
+    );
+    cache.flushAll();
+    res.json({ success: true, plan_id: result.insertId, mensaje: 'Plan creado correctamente' });
+  } catch (error) {
+    console.error('❌ Error POST /api/admin/planes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT actualizar plan
+app.put('/api/admin/planes/:id', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const { nombre, tipo, precio_1dia, precio_2dias, precio_3dias, precio_fijo, precio_completo, minimo_dias, maximo_dias, descripcion_extra, activo, orden } = req.body;
+    const [result] = await db.execute(
+      `UPDATE planes SET nombre=?, tipo=?, precio_1dia=?, precio_2dias=?, precio_3dias=?, precio_fijo=?, precio_completo=?, minimo_dias=?, maximo_dias=?, descripcion_extra=?, activo=?, orden=? WHERE plan_id=?`,
+      [nombre, tipo, precio_1dia||null, precio_2dias||null, precio_3dias||null, precio_fijo||null, precio_completo||null, minimo_dias||2, maximo_dias||3, descripcion_extra||null, activo!==false, orden||0, req.params.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Plan no encontrado' });
+    cache.flushAll();
+    res.json({ success: true, mensaje: 'Plan actualizado correctamente' });
+  } catch (error) {
+    console.error('❌ Error PUT /api/admin/planes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE plan
+app.delete('/api/admin/planes/:id', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [result] = await db.execute('DELETE FROM planes WHERE plan_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Plan no encontrado' });
+    cache.flushAll();
+    res.json({ success: true, mensaje: 'Plan eliminado correctamente' });
+  } catch (error) {
+    console.error('❌ Error DELETE /api/admin/planes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== ENDPOINTS NIVELES ====================
+
+// GET público
+app.get('/api/niveles', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [niveles] = await db.execute(
+      'SELECT * FROM niveles WHERE activo = TRUE ORDER BY orden ASC, nivel_id ASC'
+    );
+    res.json({ success: true, niveles });
+  } catch (error) {
+    console.error('❌ Error GET /api/niveles:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET admin
+app.get('/api/admin/niveles', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [niveles] = await db.execute(
+      'SELECT * FROM niveles ORDER BY orden ASC, nivel_id ASC'
+    );
+    res.json({ success: true, niveles });
+  } catch (error) {
+    console.error('❌ Error GET /api/admin/niveles:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST crear nivel
+app.post('/api/admin/niveles', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const { nombre, color_barra, color_texto, activo, orden } = req.body;
+    if (!nombre) return res.status(400).json({ success: false, error: 'nombre es requerido' });
+    const [result] = await db.execute(
+      `INSERT INTO niveles (nombre, color_barra, color_texto, activo, orden) VALUES (?, ?, ?, ?, ?)`,
+      [nombre, color_barra||'bg-gray-500', color_texto||'text-gray-600', activo!==false, orden||0]
+    );
+    cache.flushAll();
+    res.json({ success: true, nivel_id: result.insertId, mensaje: 'Nivel creado correctamente' });
+  } catch (error) {
+    console.error('❌ Error POST /api/admin/niveles:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT actualizar nivel
+app.put('/api/admin/niveles/:id', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const { nombre, color_barra, color_texto, activo, orden } = req.body;
+    const [result] = await db.execute(
+      `UPDATE niveles SET nombre=?, color_barra=?, color_texto=?, activo=?, orden=? WHERE nivel_id=?`,
+      [nombre, color_barra||'bg-gray-500', color_texto||'text-gray-600', activo!==false, orden||0, req.params.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Nivel no encontrado' });
+    cache.flushAll();
+    res.json({ success: true, mensaje: 'Nivel actualizado correctamente' });
+  } catch (error) {
+    console.error('❌ Error PUT /api/admin/niveles:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE nivel
+app.delete('/api/admin/niveles/:id', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const [result] = await db.execute('DELETE FROM niveles WHERE nivel_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Nivel no encontrado' });
+    cache.flushAll();
+    res.json({ success: true, mensaje: 'Nivel eliminado correctamente' });
+  } catch (error) {
+    console.error('❌ Error DELETE /api/admin/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
