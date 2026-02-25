@@ -5820,6 +5820,27 @@ app.delete('/api/admin/horarios/:id', async (req, res) => {
   }
 });
 
+// Borrado definitivo de horario
+app.delete('/api/admin/horarios/:id/forzar', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const horarioId = req.params.id;
+    // Eliminar inscripciones asociadas primero
+    await db.execute('DELETE FROM inscripcion_horarios WHERE horario_id = ?', [horarioId]);
+    const [result] = await db.execute('DELETE FROM horarios WHERE horario_id = ?', [horarioId]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Horario no encontrado' });
+    }
+    cache.del(getCacheKey('horarios'));
+    cache.flushAll();
+    console.log(`🗑️ Horario eliminado definitivamente: ID ${horarioId}`);
+    res.json({ success: true, message: 'Horario eliminado definitivamente' });
+  } catch (error) {
+    console.error('Error al eliminar horario definitivamente:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ELIMINAR TODAS LAS INSCRIPCIONES DE UN USUARIO
 app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
   try {
@@ -6115,6 +6136,27 @@ app.delete('/api/admin/categorias/:id', async (req, res) => {
     
     console.log(`✅ Categoría desactivada: ID ${categoriaId}`);
     res.json({ success: true, mensaje: 'Categoría desactivada correctamente' });
+  } catch (error) {
+    console.error('❌ Error al eliminar categoría:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Borrado definitivo de categoría
+app.delete('/api/admin/categorias/:id/forzar', async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const categoriaId = req.params.id;
+    const [result] = await db.execute(
+      'DELETE FROM categorias WHERE categoria_id = ?',
+      [categoriaId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Categoría no encontrada' });
+    }
+    cache.flushAll();
+    console.log(`🗑️ Categoría eliminada definitivamente: ID ${categoriaId}`);
+    res.json({ success: true, mensaje: 'Categoría eliminada definitivamente' });
   } catch (error) {
     console.error('❌ Error al eliminar categoría:', error);
     res.status(500).json({ success: false, error: error.message });
