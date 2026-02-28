@@ -558,13 +558,17 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         
         const inscripcionesIds = [];
         for (const [nombreDeporte, info] of Object.entries(deportesMap)) {
+          // ⚠️ IMPORTANTE: Usar coincidencia EXACTA (=) en vez de LIKE.
+          // LIKE '%Fútbol%' con índice sobre 'nombre' y colación utf8mb4_unicode_ci
+          // (insensible a acentos) devuelve "Baby Futbol" antes que "Fútbol" alfabéticamente,
+          // asignando el deporte_id incorrecto a todas las inscripciones.
           const [deporteRows] = await db.query(
-            'SELECT deporte_id FROM deportes WHERE nombre LIKE ?',
-            [`%${nombreDeporte}%`]
+            'SELECT deporte_id FROM deportes WHERE nombre = ?',
+            [nombreDeporte]
           );
           
           if (deporteRows.length === 0) {
-            console.warn(`⚠️ Deporte no encontrado: ${nombreDeporte}`);
+            console.warn(`⚠️ Deporte no encontrado (exacto): ${nombreDeporte}`);
             continue;
           }
           
