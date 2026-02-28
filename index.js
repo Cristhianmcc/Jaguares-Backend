@@ -6452,7 +6452,7 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       JOIN deportes d ON i.deporte_id = d.deporte_id
       LEFT JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
       LEFT JOIN horarios h ON ih.horario_id = h.horario_id
-      WHERE i.alumno_id = ? AND i.estado = 'activa'
+      WHERE i.alumno_id = ? AND i.estado IN ('activa', 'pendiente')
       ORDER BY d.nombre, h.dia, h.hora_inicio
     `, [usuario.alumno_id]);
     
