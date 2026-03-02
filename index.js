@@ -401,11 +401,13 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
     let codigoOperacion = null;
     
     if (db) {
+      const conn = await db.getConnection();
       try {
-        console.log('💾 Guardando inscripción en MySQL (prioridad)...');
+        await conn.beginTransaction();
+        console.log('💾 Guardando inscripción en MySQL (transacción)...');
         
         // 1. Verificar o crear alumno
-        const [alumnoRows] = await db.query(
+        const [alumnoRows] = await conn.query(
           'SELECT alumno_id FROM alumnos WHERE dni = ?',
           [alumno.dni]
         );
@@ -417,11 +419,11 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           alumnoId = alumnoRows[0].alumno_id;
           console.log(`✅ Alumno encontrado en MySQL: ID ${alumnoId}`);
         } else {
-          // Crear nuevo alumno
+          // Crear nuevo alumno (dentro de la transacción — se revierte si algo falla)
           alumnoCreado = true;
           const fechaNacimiento = alumno.fecha_nacimiento || '2010-01-01';
           
-          const [insertResult] = await db.query(
+          const [insertResult] = await conn.query(
             `INSERT INTO alumnos (
               dni, nombres, apellido_paterno, apellido_materno, 
               fecha_nacimiento, sexo, telefono, email, direccion,
@@ -451,6 +453,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         const horariosInvalidos = horarios.filter(h => !h.horario_id);
         if (horariosInvalidos.length > 0) {
           console.error('❌ HORARIOS SIN ID:', horariosInvalidos);
+          await conn.rollback();
+          conn.release();
           return res.status(400).json({
             success: false,
             error: 'Horarios inválidos',
@@ -520,7 +524,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         // Leer config de matrícula: si matricula_activa=false no se cobra matrícula
         let matriculaActivaVal = 1; // por defecto se cobra
         try {
-          const [configRows] = await db.query(
+          const [configRows] = await conn.query(
             "SELECT valor FROM configuracion WHERE clave = 'matricula_activa' LIMIT 1"
           );
           if (configRows.length > 0) {
@@ -537,7 +541,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         // ♻️ LIMPIAR PENDIENTES PREVIAS: Si el alumno ya tenía inscripciones pendientes
         // (ej: el usuario volvió atrás desde la confirmación para editar), las eliminamos
         // para que pueda re-confirmar sin error. Solo bloqueamos las 'activas'.
-        const [pendientesExistentes] = await db.query(
+        const [pendientesExistentes] = await conn.query(
           `SELECT inscripcion_id FROM inscripciones WHERE alumno_id = ? AND estado = 'pendiente'`,
           [alumnoId]
         );
@@ -545,12 +549,12 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           const idsPendientes = pendientesExistentes.map(r => r.inscripcion_id);
           console.log(`♻️ Eliminando ${idsPendientes.length} inscripción(es) pendiente(s) previas del alumno ${alumnoId}: [${idsPendientes.join(', ')}]`);
           // Eliminar horarios asociados primero (FK)
-          await db.query(
+          await conn.query(
             `DELETE FROM inscripcion_horarios WHERE inscripcion_id IN (${idsPendientes.map(() => '?').join(',')})`,
             idsPendientes
           );
           // Eliminar las inscripciones pendientes
-          await db.query(
+          await conn.query(
             `DELETE FROM inscripciones WHERE inscripcion_id IN (${idsPendientes.map(() => '?').join(',')})`,
             idsPendientes
           );
@@ -562,7 +566,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           // LIKE '%Fútbol%' con índice sobre 'nombre' y colación utf8mb4_unicode_ci
           // (insensible a acentos) devuelve "Baby Futbol" antes que "Fútbol" alfabéticamente,
           // asignando el deporte_id incorrecto a todas las inscripciones.
-          const [deporteRows] = await db.query(
+          const [deporteRows] = await conn.query(
             'SELECT deporte_id FROM deportes WHERE nombre = ?',
             [nombreDeporte]
           );
@@ -578,7 +582,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           const precioMensual = calcularPrecio(cantidadDias, plan, nombreDeporte);
           
           // ⚠️ VALIDACIÓN: Solo bloquear si ya existe inscripción ACTIVA (no pendiente, esas ya se limpiaron)
-          const [inscripcionActiva] = await db.query(
+          const [inscripcionActiva] = await conn.query(
             `SELECT inscripcion_id, estado, plan, precio_mensual 
              FROM inscripciones 
              WHERE alumno_id = ? AND deporte_id = ? AND estado = 'activa'
@@ -589,7 +593,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           if (inscripcionActiva.length > 0) {
             const inscExist = inscripcionActiva[0];
             console.warn(`⚠️ DUPLICADO ACTIVO: Alumno ${alumnoId} ya tiene inscripción ACTIVA en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
-            
+            await conn.rollback();
+            conn.release();
             return res.status(409).json({
               success: false,
               error: 'Inscripción duplicada',
@@ -604,7 +609,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             });
           }
           
-          const [result] = await db.query(
+          const [result] = await conn.query(
             `INSERT INTO inscripciones (codigo_operacion, alumno_id, deporte_id, plan, precio_mensual, matricula_pagada, estado)
              VALUES (?, ?, ?, ?, ?, ?, 'pendiente')`,
             [codigoOperacion, alumnoId, deporteId, plan, precioMensual, matriculaActivaVal]
@@ -625,7 +630,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           for (const horario of horariosInscripcion) {
             if (horario.horario_id) {
               try {
-                await db.query(
+                await conn.query(
                   `INSERT INTO inscripcion_horarios (inscripcion_id, horario_id)
                    VALUES (?, ?)`,
                   [inscripcionId, horario.horario_id]
@@ -633,7 +638,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                 horariosGuardados++;
                 console.log(`✅ Horario guardado: Inscripción ${inscripcionId} -> Horario ${horario.horario_id}`);
               } catch (horarioError) {
-                console.error(`❌ Error guardando horario ${horario.horario_id} para inscripción ${inscripcionId}:`, horarioError.message);
+                // Si falla un horario individual, toda la transacción debe revertirse
+                throw horarioError;
               }
             } else {
               console.error(`❌ Horario sin ID para inscripción ${inscripcionId}:`, horario);
@@ -647,6 +653,10 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           console.error('⚠️ ADVERTENCIA: No se guardó ningún horario');
         }
         
+        // Todo salió bien → confirmar la transacción (alumno + inscripciones + horarios)
+        await conn.commit();
+        conn.release();
+
         inscripcionData = {
           alumnoId,
           alumnoCreado,
@@ -656,11 +666,27 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         
         console.log('✅ INSCRIPCIÓN GUARDADA EN MYSQL');
       } catch (mysqlError) {
+        // Revertir TODOS los cambios: alumno, inscripciones y horarios quedan como si nada
+        try { await conn.rollback(); } catch (_) {}
+        conn.release();
+
         console.error('❌ Error MySQL:', mysqlError);
+        // Construir mensaje orientativo según el código MySQL
+        let mensajeUsuario = 'No se pudo completar la inscripción. Por favor intente nuevamente.';
+        let codigoError = mysqlError.code || 'UNKNOWN';
+        if (codigoError === 'ER_DUP_ENTRY') {
+          mensajeUsuario = 'El alumno ya tiene una inscripción registrada para este deporte.';
+        } else if (codigoError === 'ER_NO_REFERENCED_ROW_2') {
+          mensajeUsuario = 'Uno de los horarios seleccionados ya no está disponible. Vuelve y selecciona otro.';
+        } else if (['ECONNRESET', 'PROTOCOL_CONNECTION_LOST', 'ECONNREFUSED'].includes(codigoError)) {
+          mensajeUsuario = 'Conexión con la base de datos interrumpida. Intente nuevamente en unos segundos.';
+        }
         return res.status(500).json({
           success: false,
           error: 'Error al guardar inscripción',
-          message: 'No se pudo completar la inscripción. Intente nuevamente.'
+          message: mensajeUsuario,
+          codigo: codigoError,
+          detalles: mysqlError.sqlMessage || mysqlError.message || codigoError
         });
       }
     }
