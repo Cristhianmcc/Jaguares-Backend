@@ -8,6 +8,7 @@ import { config } from 'dotenv';
 import NodeCache from 'node-cache';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
 
 // Importar middlewares de seguridad
 import { verificarAutenticacion, verificarAdmin, generarToken } from './middleware/auth.js';
@@ -49,9 +50,14 @@ let db;
 async function initDatabase() {
   try {
     db = await mysql.createPool(dbConfig);
+    // Garantizar utf8mb4 en CADA conexión del pool
+    db.pool.on('connection', (conn) => {
+      conn.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
+    });
     // Test de conexión
     const connection = await db.getConnection();
-    console.log('✅ Conexión a MySQL establecida correctamente');
+    await connection.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
+    console.log('✅ Conexión a MySQL establecida correctamente (utf8mb4)');
     connection.release();
   } catch (error) {
     console.error('❌ Error al conectar con MySQL:', error);
@@ -818,7 +824,7 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
           FROM inscripciones i
           INNER JOIN alumnos a ON i.alumno_id = a.alumno_id
           INNER JOIN deportes d ON i.deporte_id = d.deporte_id
-          WHERE a.dni = ? AND i.estado = 'activa'
+          WHERE a.dni = ? AND i.estado IN ('activa', 'pendiente')
           ORDER BY i.fecha_inscripcion DESC
         `, [dni]);
         
@@ -859,6 +865,242 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
       success: false, 
       error: error.message || 'Error al obtener inscripciones' 
     });
+  }
+});
+
+// Endpoint: Eliminar un día/horario de una inscripción existente
+app.post('/api/eliminar-horario', async (req, res) => {
+  try {
+    const { dni, inscripcion_id, horario_id } = req.body;
+
+    if (!dni || !inscripcion_id || !horario_id) {
+      return res.status(400).json({ success: false, error: 'Datos incompletos' });
+    }
+    if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+
+    // 1. Validar que la inscripción pertenece al DNI y está activa
+    const [inscRows] = await db.query(`
+      SELECT i.inscripcion_id, i.plan, d.nombre as deporte
+      FROM inscripciones i
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE a.dni = ? AND i.inscripcion_id = ? AND i.estado = 'activa'
+    `, [dni, inscripcion_id]);
+
+    if (inscRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada o no está activa' });
+    }
+
+    // 2. Verificar que quedan más de 1 día (no dejar inscripción vacía)
+    const [countRows] = await db.query(
+      'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
+      [inscripcion_id]
+    );
+    if (countRows[0].total <= 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'No puedes eliminar el único día registrado. Si deseas cancelar la inscripción, contacta al administrador.'
+      });
+    }
+
+    // 3. Eliminar el horario
+    const [del] = await db.query(
+      'DELETE FROM inscripcion_horarios WHERE inscripcion_id = ? AND horario_id = ?',
+      [inscripcion_id, horario_id]
+    );
+    if (del.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Horario no encontrado en esta inscripción' });
+    }
+
+    // 4. Recalcular precio_mensual con el nuevo total de días
+    const [totalRows] = await db.query(
+      'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
+      [inscripcion_id]
+    );
+    const totalDias = totalRows[0].total;
+    const { plan, deporte } = inscRows[0];
+
+    const calcularPrecio = (dias, plan, deporte) => {
+      if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
+      if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+        if (dias === 1) return 50; if (dias === 2) return 100; return 150;
+      }
+      if (plan === 'Económico') { if (dias === 2) return 60; if (dias >= 3) return 80; return 60; }
+      if (plan === 'Estándar') { if (dias === 1) return 40; if (dias === 2) return 80; return 120; }
+      if (plan === 'Premium') { if (dias === 2) return 100; return 150; }
+      return 60;
+    };
+    const nuevoPrecio = calcularPrecio(totalDias, plan, deporte);
+    await db.query('UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?', [nuevoPrecio, inscripcion_id]);
+
+    // 5. Limpiar caché
+    cache.del(getCacheKey('consultas', dni));
+    console.log(`🗑️ Horario ${horario_id} eliminado de inscripción ${inscripcion_id}. Días restantes: ${totalDias}. Precio: S/.${nuevoPrecio}`);
+
+    res.json({
+      success: true,
+      message: 'Día eliminado correctamente',
+      nuevo_precio: nuevoPrecio,
+      total_dias: totalDias
+    });
+  } catch (error) {
+    console.error('❌ Error al eliminar horario:', error);
+    res.status(500).json({ success: false, error: 'Error al eliminar el horario. Intente nuevamente.' });
+  }
+});
+
+// Endpoint: Agregar un día/horario a una inscripción existente
+app.post('/api/agregar-horario', async (req, res) => {
+  try {
+    const { dni, inscripcion_id, horario_id } = req.body;
+
+    if (!dni || !inscripcion_id || !horario_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Datos incompletos: se requiere dni, inscripcion_id y horario_id'
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+    }
+
+    // 1. Validar que la inscripción pertenece al DNI y está activa
+    const [inscRows] = await db.query(`
+      SELECT i.inscripcion_id, i.deporte_id, d.nombre as deporte
+      FROM inscripciones i
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE a.dni = ? AND i.inscripcion_id = ? AND i.estado = 'activa'
+    `, [dni, inscripcion_id]);
+
+    if (inscRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Inscripción no encontrada o no está activa'
+      });
+    }
+
+    const inscripcion = inscRows[0];
+
+    // 2. Validar que el horario existe y pertenece al mismo deporte
+    const [horRows] = await db.query(`
+      SELECT horario_id, dia, TIME_FORMAT(hora_inicio, '%H:%i') as hora_inicio, categoria, plan
+      FROM horarios
+      WHERE horario_id = ? AND deporte_id = ? AND estado = 'activo'
+    `, [horario_id, inscripcion.deporte_id]);
+
+    if (horRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El horario no corresponde al deporte inscrito o no está disponible'
+      });
+    }
+
+    // 2b. Validar que la categoría y plan del nuevo horario coincidan con los horarios existentes
+    const [horExistentes] = await db.query(`
+      SELECT h.categoria, h.plan
+      FROM inscripcion_horarios ih
+      JOIN horarios h ON ih.horario_id = h.horario_id
+      WHERE ih.inscripcion_id = ?
+      LIMIT 1
+    `, [inscripcion_id]);
+
+    if (horExistentes.length > 0) {
+      const { categoria: catExistente, plan: planExistente } = horExistentes[0];
+      const { categoria: catNueva, plan: planNuevo } = horRows[0];
+      if (catExistente && catNueva && catExistente !== catNueva) {
+        return res.status(400).json({
+          success: false,
+          error: `El horario seleccionado es de categoría ${catNueva}, pero tu inscripción es de categoría ${catExistente}.`
+        });
+      }
+      if (planExistente && planNuevo && planExistente !== planNuevo) {
+        return res.status(400).json({
+          success: false,
+          error: `El horario seleccionado corresponde al plan ${planNuevo}, pero tu inscripción es del plan ${planExistente}.`
+        });
+      }
+    }
+
+    // 3. Verificar que no esté ya inscrito en ese horario
+    const [existRows] = await db.query(`
+      SELECT 1 FROM inscripcion_horarios
+      WHERE inscripcion_id = ? AND horario_id = ?
+    `, [inscripcion_id, horario_id]);
+
+    if (existRows.length > 0) {
+      return res.status(409).json({ success: false, error: 'Ya estás inscrito en ese horario' });
+    }
+
+    // 4. Insertar el nuevo horario
+    await db.query(`
+      INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)
+    `, [inscripcion_id, horario_id]);
+
+    // 5. Recalcular precio_mensual según el nuevo total de días
+    const [totalDiasRows] = await db.query(`
+      SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?
+    `, [inscripcion_id]);
+    const totalDias = totalDiasRows[0].total;
+
+    const [planRows] = await db.query(`
+      SELECT plan FROM inscripciones WHERE inscripcion_id = ?
+    `, [inscripcion_id]);
+    const plan = planRows[0]?.plan || 'Económico';
+    const deporteNombre = inscripcion.deporte;
+
+    // Misma lógica que el endpoint de inscripción
+    const calcularPrecio = (cantidadDias, plan, deporte) => {
+      if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
+      if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+        if (cantidadDias === 1) return 50;
+        if (cantidadDias === 2) return 100;
+        if (cantidadDias >= 3) return 150;
+        return 50;
+      }
+      if (plan === 'Económico') {
+        if (cantidadDias === 2) return 60;
+        if (cantidadDias >= 3) return 80;
+        return 60;
+      }
+      if (plan === 'Estándar') {
+        if (cantidadDias === 1) return 40;
+        if (cantidadDias === 2) return 80;
+        if (cantidadDias >= 3) return 120;
+        return 40;
+      }
+      if (plan === 'Premium') {
+        if (cantidadDias === 2) return 100;
+        if (cantidadDias >= 3) return 150;
+        return 100;
+      }
+      return 60;
+    };
+
+    const nuevoPrecio = calcularPrecio(totalDias, plan, deporteNombre);
+    await db.query(`
+      UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?
+    `, [nuevoPrecio, inscripcion_id]);
+
+    console.log(`💰 precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} días, plan ${plan})`);
+
+    // 6. Limpiar caché del DNI
+    const cacheKeyConsulta = getCacheKey('consultas', dni);
+    cache.del(cacheKeyConsulta);
+
+    console.log(`✅ Horario ${horario_id} (${horRows[0].dia} ${horRows[0].hora_inicio}) agregado a inscripción ${inscripcion_id} (DNI ${dni})`);
+
+    res.json({
+      success: true,
+      message: `Día ${horRows[0].dia} agregado correctamente a ${inscripcion.deporte}`,
+      nuevo_precio: nuevoPrecio,
+      total_dias: totalDias
+    });
+
+  } catch (error) {
+    console.error('❌ Error al agregar horario:', error);
+    res.status(500).json({ success: false, error: 'Error al agregar el horario. Intente nuevamente.' });
   }
 });
 
@@ -1105,6 +1347,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
         for (const inscripcion of inscripciones) {
           const [horarios] = await db.query(`
             SELECT 
+              h.horario_id,
               h.dia,
               TIME_FORMAT(h.hora_inicio, '%H:%i') as hora_inicio,
               TIME_FORMAT(h.hora_fin, '%H:%i') as hora_fin,
@@ -1119,6 +1362,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             horarios.forEach(h => {
               horariosCompletos.push({
                 inscripcion_id: inscripcion.inscripcion_id,
+                horario_id: h.horario_id,
                 deporte: inscripcion.deporte,
                 sede: 'Sede Principal',
                 plan: inscripcion.plan || 'Económico',
@@ -4864,6 +5108,808 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// MÓDULO: Editor de Landing Page
+// ─────────────────────────────────────────────────────────────
+const LANDING_CONTENT_PATH = path.join(__dirname, 'landing-content.json');
+
+// Configurar multer para subida de imágenes de la landing
+const UPLOADS_DIR = path.join(__dirname, '..', 'react', 'public', 'assets', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const imageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const name = `landing-${Date.now()}-${Math.random().toString(36).slice(2,7)}${ext}`;
+    cb(null, name);
+  }
+});
+const imageUpload = multer({
+  storage: imageStorage,
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) return cb(new Error('Solo se permiten imágenes'));
+    cb(null, true);
+  }
+});
+
+// POST /api/admin/upload-image
+app.post('/api/admin/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+  const url = `/assets/uploads/${req.file.filename}`;
+  console.log(`[LandingEditor] Imagen subida: ${url}`);
+  res.json({ success: true, url });
+});
+
+
+function leerLandingContent() {
+  try {
+    const raw = fs.readFileSync(LANDING_CONTENT_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+// GET /api/admin/landing-content  — lectura pública (usada por Home si quiere)
+app.get('/api/admin/landing-content', async (req, res) => {
+  try {
+    const content = leerLandingContent();
+    if (!content) return res.status(404).json({ success: false, error: 'Contenido no encontrado' });
+    res.json({ success: true, data: content });
+  } catch (error) {
+    console.error('Error leyendo landing-content:', error);
+    res.status(500).json({ success: false, error: 'Error interno' });
+  }
+});
+
+// PUT /api/admin/landing-content  — escritura protegida (solo admins)
+app.put('/api/admin/landing-content', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const nuevoContenido = req.body;
+    if (!nuevoContenido || typeof nuevoContenido !== 'object') {
+      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    }
+
+    // Preservar meta y actualizar timestamp
+    const actual = leerLandingContent() || {};
+    nuevoContenido._meta = {
+      ultimaActualizacion: new Date().toISOString(),
+      actualizadoPor: req.usuario?.email || 'admin'
+    };
+
+    fs.writeFileSync(LANDING_CONTENT_PATH, JSON.stringify(nuevoContenido, null, 2), 'utf-8');
+    console.log(`[LandingEditor] Contenido actualizado por ${nuevoContenido._meta.actualizadoPor}`);
+
+    res.json({ success: true, message: 'Contenido guardado correctamente', meta: nuevoContenido._meta });
+  } catch (error) {
+    console.error('Error guardando landing-content:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar' });
+  }
+});
+
+// POST /api/admin/landing-content/reset — restaurar valores por defecto
+app.post('/api/admin/landing-content/reset', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const DEFAULT_PATH = path.join(__dirname, 'landing-content.json');
+    // Leemos el archivo actual y lo restauramos borrando la meta
+    const content = leerLandingContent();
+    if (content) {
+      content._meta = { ultimaActualizacion: null, actualizadoPor: null };
+      fs.writeFileSync(DEFAULT_PATH, JSON.stringify(content, null, 2), 'utf-8');
+    }
+    res.json({ success: true, message: 'Contenido restaurado' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Error al restaurar' });
+  }
+});
+
+// ==============================================================
+// MÓDULO 3 — Landing content con persistencia en MySQL
+// ==============================================================
+
+// --- Helpers ---
+
+/**
+ * Recibe el objeto de contenido de la landing y devuelve
+ * arrays de filas para landing_texts y landing_images.
+ */
+function contentToRows(content) {
+  const texts  = [];
+  const images = [];
+
+  const pushText  = (slug, idx, clave, valor) => texts.push({ section_slug: slug, item_index: idx, clave, valor: valor != null ? String(valor) : '' });
+  const pushImage = (slug, idx, clave, url)   => images.push({ section_slug: slug, item_index: idx, clave, url: url || '' });
+
+  // hero — fields: title, subtitle, description, image, sport, accent
+  const slides = content?.hero?.slides || [];
+  slides.forEach((s, i) => {
+    pushText('hero', i, 'title',       s.title);
+    pushText('hero', i, 'subtitle',    s.subtitle);
+    pushText('hero', i, 'description', s.description);
+    pushText('hero', i, 'sport',       s.sport);
+    pushText('hero', i, 'accent',      s.accent);
+    if (s.image) pushImage('hero', i, 'image', s.image);
+  });
+
+  // deportes — fields: titulo, descripcion, imagen, categoria, fecha, destacado
+  const deportes = content?.deportes || [];
+  deportes.forEach((d, i) => {
+    pushText('deportes', i, 'titulo',      d.titulo);
+    pushText('deportes', i, 'descripcion', d.descripcion);
+    pushText('deportes', i, 'categoria',   d.categoria);
+    pushText('deportes', i, 'fecha',       d.fecha);
+    pushText('deportes', i, 'destacado',   d.destacado ? '1' : '0');
+    if (d.imagen) pushImage('deportes', i, 'imagen', d.imagen);
+  });
+
+  // estadisticas — flat object: gente, partidos, anos, trofeos
+  const est = content?.estadisticas || {};
+  pushText('estadisticas', 0, 'gente',    est.gente);
+  pushText('estadisticas', 0, 'partidos', est.partidos);
+  pushText('estadisticas', 0, 'anos',     est.anos);
+  pushText('estadisticas', 0, 'trofeos',  est.trofeos);
+
+  // docentes — fields: nombre, especialidad, foto
+  const docentes = content?.docentes || [];
+  docentes.forEach((d, i) => {
+    pushText('docentes', i, 'nombre',       d.nombre);
+    pushText('docentes', i, 'especialidad', d.especialidad);
+    if (d.foto) pushImage('docentes', i, 'foto', d.foto);
+  });
+
+  // cta — fields: titulo, subtitulo, botonTexto, botonEnlace + imagen
+  const cta = content?.cta || {};
+  pushText('cta', 0, 'titulo',      cta.titulo);
+  pushText('cta', 0, 'subtitulo',   cta.subtitulo);
+  pushText('cta', 0, 'botonTexto',  cta.botonTexto);
+  pushText('cta', 0, 'botonEnlace', cta.botonEnlace);
+  if (cta.imagen) pushImage('cta', 0, 'imagen', cta.imagen);
+
+  // general — fields: nombreClub, copyright, facebook, whatsapp
+  const gen = content?.general || {};
+  pushText('general', 0, 'nombreClub', gen.nombreClub);
+  pushText('general', 0, 'copyright',  gen.copyright);
+  pushText('general', 0, 'facebook',   gen.facebook);
+  pushText('general', 0, 'whatsapp',   gen.whatsapp);
+
+  // tipografia — fields: fuenteTitulos, pesoTitulos, fuenteCuerpo
+  const tip = content?.tipografia || {};
+  pushText('tipografia', 0, 'fuenteTitulos', tip.fuenteTitulos);
+  pushText('tipografia', 0, 'pesoTitulos',   tip.pesoTitulos);
+  pushText('tipografia', 0, 'fuenteCuerpo',  tip.fuenteCuerpo);
+
+  // partidos — array de 4 partidos, cada uno con equipoLocal, equipoVisita, fecha, resultado, liga, season, sede
+  const partidos = content?.partidos || [];
+  partidos.forEach((p, i) => {
+    pushText('partidos', i, 'local_nombre',  p.equipoLocal?.nombre);
+    pushText('partidos', i, 'visita_nombre', p.equipoVisita?.nombre);
+    pushText('partidos', i, 'fecha',         p.fecha);
+    pushText('partidos', i, 'resultado',     p.resultado);
+    pushText('partidos', i, 'liga',          p.liga);
+    pushText('partidos', i, 'season',        p.season);
+    pushText('partidos', i, 'sede',          p.sede);
+    if (p.equipoLocal?.logo)  pushImage('partidos', i, 'local_logo',  p.equipoLocal.logo);
+    if (p.equipoVisita?.logo) pushImage('partidos', i, 'visita_logo', p.equipoVisita.logo);
+  });
+
+  // novedades — header (subtitulo, titulo) + array de items
+  const nov = content?.novedades || {};
+  pushText('novedades', 0, 'subtitulo', nov.subtitulo);
+  pushText('novedades', 0, 'titulo',    nov.titulo);
+  (nov.items || []).forEach((item, i) => {
+    pushText('novedades_art', i, 'categoria',      item.categoria);
+    pushText('novedades_art', i, 'titulo',          item.titulo);
+    pushText('novedades_art', i, 'fecha',           item.fecha);
+    pushText('novedades_art', i, 'comentarios',     item.comentarios);
+    pushText('novedades_art', i, 'enlace',          item.enlace);
+    pushText('novedades_art', i, 'alt',             item.alt);
+    pushText('novedades_art', i, 'categoria_href',  item.categoria_href);
+    pushText('novedades_art', i, 'titulo_href',     item.titulo_href);
+    if (item.imagen) pushImage('novedades_art', i, 'imagen', item.imagen);
+  });
+
+  // patrocinadores — array de sponsors con nombre, enlace e imagen opcional
+  const sponsors = content?.patrocinadores || [];
+  sponsors.forEach((sp, i) => {
+    pushText('patrocinadores', i, 'nombre', sp.nombre);
+    pushText('patrocinadores', i, 'enlace', sp.enlace);
+    if (sp.imagen) pushImage('patrocinadores', i, 'logo', sp.imagen);
+  });
+
+  // galeria — botonTexto + 6 items con alt e imagen
+  const galeria = content?.galeria || {};
+  pushText('galeria', 0, 'botonTexto', galeria.botonTexto);
+  const galeriaItems = galeria.items || [];
+  galeriaItems.forEach((item, i) => {
+    pushText('galeria', i + 1, 'alt', item.alt);
+    if (item.imagen) pushImage('galeria', i + 1, 'imagen', item.imagen);
+  });
+
+  return { texts, images };
+}
+
+/**
+ * A partir de arrays de filas de la BD, reconstruye
+ * el mismo objeto JSON que espera el frontend.
+ */
+function rowsToContent(textRows, imageRows) {
+  // Index por clave compuesta slug|idx|clave
+  const tIdx = {};
+  textRows.forEach(r => { tIdx[`${r.section_slug}|${r.item_index}|${r.clave}`] = r.valor; });
+
+  const iIdx = {};
+  imageRows.forEach(r => { iIdx[`${r.section_slug}|${r.item_index}|${r.clave}`] = r.url; });
+
+  const maxIdx = (slug, rows) => {
+    let max = -1;
+    rows.forEach(r => { if (r.section_slug === slug && r.item_index > max) max = r.item_index; });
+    return max;
+  };
+
+  // hero
+  const heroMax = maxIdx('hero', textRows);
+  const slides = heroMax < 0 ? [] : Array.from({ length: heroMax + 1 }, (_, i) => ({
+    id:           i + 1,
+    sport:        tIdx[`hero|${i}|sport`]       || '',
+    title:        tIdx[`hero|${i}|title`]        || '',
+    subtitle:     tIdx[`hero|${i}|subtitle`]     || '',
+    description:  tIdx[`hero|${i}|description`]  || '',
+    accent:       tIdx[`hero|${i}|accent`]       || '',
+    image:        iIdx[`hero|${i}|image`]        || ''
+  }));
+
+  // deportes
+  const depMax = maxIdx('deportes', textRows);
+  const deportes = depMax < 0 ? [] : Array.from({ length: depMax + 1 }, (_, i) => ({
+    id:          i + 1,
+    titulo:      tIdx[`deportes|${i}|titulo`]      || '',
+    descripcion: tIdx[`deportes|${i}|descripcion`] || '',
+    categoria:   tIdx[`deportes|${i}|categoria`]   || '',
+    fecha:       tIdx[`deportes|${i}|fecha`]       || '',
+    destacado:   tIdx[`deportes|${i}|destacado`]   === '1',
+    imagen:      iIdx[`deportes|${i}|imagen`]      || ''
+  }));
+
+  // estadisticas — flat object (no es array)
+  const estadisticas = {
+    gente:    tIdx['estadisticas|0|gente']    || '',
+    partidos: tIdx['estadisticas|0|partidos'] || '',
+    anos:     tIdx['estadisticas|0|anos']     || '',
+    trofeos:  tIdx['estadisticas|0|trofeos']  || ''
+  };
+
+  // docentes
+  const docMax = maxIdx('docentes', textRows);
+  const docentes = docMax < 0 ? [] : Array.from({ length: docMax + 1 }, (_, i) => ({
+    id:           i + 1,
+    nombre:       tIdx[`docentes|${i}|nombre`]       || '',
+    especialidad: tIdx[`docentes|${i}|especialidad`] || '',
+    foto:         iIdx[`docentes|${i}|foto`]         || ''
+  }));
+
+  return {
+    hero:         { slides },
+    deportes,
+    estadisticas,
+    docentes,
+    partidos: (() => {
+      const max = maxIdx('partidos', textRows);
+      if (max < 0) return [];
+      return Array.from({ length: max + 1 }, (_, i) => ({
+        id:           i + 1,
+        equipoLocal:  { nombre: tIdx[`partidos|${i}|local_nombre`]  || '', logo: iIdx[`partidos|${i}|local_logo`]  || '' },
+        equipoVisita: { nombre: tIdx[`partidos|${i}|visita_nombre`] || '', logo: iIdx[`partidos|${i}|visita_logo`] || '' },
+        fecha:         tIdx[`partidos|${i}|fecha`]     || '',
+        resultado:     tIdx[`partidos|${i}|resultado`] || '',
+        liga:          tIdx[`partidos|${i}|liga`]      || '',
+        season:        tIdx[`partidos|${i}|season`]    || '',
+        sede:          tIdx[`partidos|${i}|sede`]      || '',
+      }));
+    })(),
+    cta: {
+      titulo:      tIdx['cta|0|titulo']      || '',
+      subtitulo:   tIdx['cta|0|subtitulo']   || '',
+      botonTexto:  tIdx['cta|0|botonTexto']  || '',
+      botonEnlace: tIdx['cta|0|botonEnlace'] || '/inscripcion',
+      imagen:      iIdx['cta|0|imagen']      || ''
+    },
+    general: {
+      nombreClub: tIdx['general|0|nombreClub'] || '',
+      copyright:  tIdx['general|0|copyright']  || '',
+      facebook:   tIdx['general|0|facebook']   || '',
+      whatsapp:   tIdx['general|0|whatsapp']   || ''
+    },
+    tipografia: {
+      fuenteTitulos: tIdx['tipografia|0|fuenteTitulos'] || 'Inter Tight',
+      pesoTitulos:   tIdx['tipografia|0|pesoTitulos']   || '700',
+      fuenteCuerpo:  tIdx['tipografia|0|fuenteCuerpo']  || 'DM Sans',
+    },
+    novedades: {
+      subtitulo: tIdx['novedades|0|subtitulo'] || 'Academia Jaguares',
+      titulo:    tIdx['novedades|0|titulo']    || 'Últimas Novedades',
+      items: (() => {
+        const max = maxIdx('novedades_art', textRows);
+        if (max < 0) return [];
+        return Array.from({ length: max + 1 }, (_, i) => ({
+          id:            i + 1,
+          categoria:     tIdx[`novedades_art|${i}|categoria`]     || '',
+          titulo:        tIdx[`novedades_art|${i}|titulo`]         || '',
+          fecha:         tIdx[`novedades_art|${i}|fecha`]          || '',
+          comentarios:   tIdx[`novedades_art|${i}|comentarios`]    || '',
+          enlace:        tIdx[`novedades_art|${i}|enlace`]         || '#',
+          alt:           tIdx[`novedades_art|${i}|alt`]            || '',
+          categoria_href:tIdx[`novedades_art|${i}|categoria_href`] || '#',
+          titulo_href:   tIdx[`novedades_art|${i}|titulo_href`]    || '#',
+          imagen:        iIdx[`novedades_art|${i}|imagen`]         || '',
+        }));
+      })()
+    },
+    patrocinadores: (() => {
+      const max = maxIdx('patrocinadores', textRows);
+      if (max < 0) return [];
+      return Array.from({ length: max + 1 }, (_, i) => ({
+        id:     i + 1,
+        nombre: tIdx[`patrocinadores|${i}|nombre`] || '',
+        enlace: tIdx[`patrocinadores|${i}|enlace`] || '#',
+        imagen: iIdx[`patrocinadores|${i}|logo`]   || '',
+      }));
+    })(),
+    galeria: {
+      botonTexto: tIdx['galeria|0|botonTexto'] || 'Síguenos en Facebook',
+      items: Array.from({ length: 6 }, (_, i) => ({
+        imagen: iIdx[`galeria|${i + 1}|imagen`] || '',
+        alt:    tIdx[`galeria|${i + 1}|alt`]    || '',
+      }))
+    }
+  };
+}
+
+// GET /api/landing
+// Devuelve el contenido activo de la landing para el público.
+// Prioridad: landing_versions (status=published) → landing_texts/images → JSON fallback
+app.get('/api/landing', async (req, res) => {
+  try {
+    // Cache: 30 s browser + stale-while-revalidate 60 s para CDN/proxy
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+
+    // Módulo 5: buscar versión publicada en landing_versions
+    const [vRows] = await db.query(
+      `SELECT content FROM landing_versions WHERE status = 'published' ORDER BY published_at DESC LIMIT 1`
+    );
+    if (vRows.length > 0) {
+      const content = typeof vRows[0].content === 'string'
+        ? JSON.parse(vRows[0].content)
+        : vRows[0].content;
+      return res.json({ success: true, source: 'versions', data: content });
+    }
+
+    // Módulo 3 fallback: landing_texts / landing_images
+    const [textRows]  = await db.query('SELECT section_slug, item_index, clave, valor FROM landing_texts');
+    const [imageRows] = await db.query('SELECT section_slug, item_index, clave, url FROM landing_images');
+
+    if (textRows.length === 0 && imageRows.length === 0) {
+      const json = leerLandingContent();
+      return res.json({ success: true, source: 'json', data: json });
+    }
+
+    const data = rowsToContent(textRows, imageRows);
+    res.json({ success: true, source: 'db', data });
+  } catch (error) {
+    console.error('[Landing] Error GET /api/landing:', error);
+    res.status(500).json({ success: false, error: 'Error al leer contenido' });
+  }
+});
+
+// POST /api/landing/update
+// Guarda el contenido completo en la BD Y en landing-content.json.
+// Requiere autenticación de admin.
+app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const content = req.body;
+    if (!content || typeof content !== 'object') {
+      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    }
+
+    const { texts, images } = contentToRows(content);
+
+    await conn.beginTransaction();
+
+    // UPSERT texts
+    for (const t of texts) {
+      await conn.query(
+        `INSERT INTO landing_texts (section_slug, item_index, clave, valor)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE valor = VALUES(valor), updated_at = CURRENT_TIMESTAMP`,
+        [t.section_slug, t.item_index, t.clave, t.valor]
+      );
+    }
+
+    // UPSERT images
+    for (const img of images) {
+      await conn.query(
+        `INSERT INTO landing_images (section_slug, item_index, clave, url)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE url = VALUES(url), updated_at = CURRENT_TIMESTAMP`,
+        [img.section_slug, img.item_index, img.clave, img.url]
+      );
+    }
+
+    await conn.commit();
+
+    // También persistir en JSON para backward-compat con endpoints viejos
+    const meta = {
+      ultimaActualizacion: new Date().toISOString(),
+      actualizadoPor: req.usuario?.email || 'admin'
+    };
+    const contentConMeta = { ...content, _meta: meta };
+    fs.writeFileSync(LANDING_CONTENT_PATH, JSON.stringify(contentConMeta, null, 2), 'utf-8');
+
+    console.log(`[Landing] Contenido actualizado en BD+JSON por ${meta.actualizadoPor}. Textos: ${texts.length}, Imágenes: ${images.length}`);
+    res.json({ success: true, message: 'Contenido guardado en BD y JSON', meta, stats: { texts: texts.length, images: images.length } });
+  } catch (error) {
+    await conn.rollback();
+    console.error('[Landing] Error POST /api/landing/update:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar contenido' });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/landing/seed
+// Admin only. Lee landing-content.json y lo migra a la BD.
+// Útil para la primera carga o para resetear desde el archivo.
+app.post('/api/landing/seed', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const content = leerLandingContent();
+    if (!content) return res.status(404).json({ success: false, error: 'landing-content.json no encontrado' });
+
+    const { texts, images } = contentToRows(content);
+
+    await conn.beginTransaction();
+
+    // Limpiar antes de insertar (para seed limpio)
+    await conn.query('DELETE FROM landing_texts');
+    await conn.query('DELETE FROM landing_images');
+
+    for (const t of texts) {
+      await conn.query(
+        'INSERT INTO landing_texts (section_slug, item_index, clave, valor) VALUES (?, ?, ?, ?)',
+        [t.section_slug, t.item_index, t.clave, t.valor]
+      );
+    }
+    for (const img of images) {
+      await conn.query(
+        'INSERT INTO landing_images (section_slug, item_index, clave, url) VALUES (?, ?, ?, ?)',
+        [img.section_slug, img.item_index, img.clave, img.url]
+      );
+    }
+
+    await conn.commit();
+    console.log(`[Landing] Seed completado. Textos: ${texts.length}, Imágenes: ${images.length}`);
+    res.json({ success: true, message: 'Seed completado', stats: { texts: texts.length, images: images.length } });
+  } catch (error) {
+    await conn.rollback();
+    console.error('[Landing] Error en seed:', error);
+    res.status(500).json({ success: false, error: 'Error en seed' });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/landing/upload-image
+// Alias del endpoint de subida de imágenes que ya existe.
+// Usa el mismo middleware multer (imageUpload).
+app.post('/api/landing/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+    const url = `/assets/uploads/${req.file.filename}`;
+    console.log(`[Landing] Imagen subida: ${url}`);
+    res.json({ success: true, url, originalName: req.file.originalname });
+  } catch (error) {
+    console.error('[Landing] Error subiendo imagen:', error);
+    res.status(500).json({ success: false, error: 'Error al subir imagen' });
+  }
+});
+
+// ==============================================================
+// MÓDULO 5 — SISTEMA DE PUBLICACIÓN DE VERSIONES
+// ==============================================================
+
+// GET /api/landing/versions
+// Lista todas las versiones (sin el campo content para no saturar).
+// Requiere autenticación de admin.
+app.get('/api/landing/versions', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT id, label, notes, status, created_at, created_by, published_at, published_by
+       FROM landing_versions
+       ORDER BY created_at DESC
+       LIMIT 50`
+    );
+    res.json({ success: true, versions: rows });
+  } catch (error) {
+    console.error('[Versions] Error GET /api/landing/versions:', error);
+    res.status(500).json({ success: false, error: 'Error al leer versiones' });
+  }
+});
+
+// GET /api/landing/versions/:id
+// Devuelve el contenido completo de una versión específica.
+// Requiere autenticación de admin.
+app.get('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await db.query(
+      `SELECT id, label, notes, status, content, created_at, created_by, published_at, published_by
+       FROM landing_versions WHERE id = ?`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+
+    const version = rows[0];
+    if (typeof version.content === 'string') version.content = JSON.parse(version.content);
+    res.json({ success: true, version });
+  } catch (error) {
+    console.error('[Versions] Error GET /api/landing/versions/:id:', error);
+    res.status(500).json({ success: false, error: 'Error al leer versión' });
+  }
+});
+
+// POST /api/landing/draft
+// Guarda el contenido actual como un nuevo borrador.
+// NO modifica la versión publicada ni afecta al público.
+// Requiere autenticación de admin.
+app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const content = req.body;
+    if (!content || typeof content !== 'object') {
+      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    }
+
+    const autor = req.usuario?.email || 'admin';
+    const now   = new Date();
+    const label  = content._draftLabel
+      || `Borrador · ${now.toLocaleDateString('es-PE')} ${now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`;
+    const notes  = content._draftNotes || null;
+
+    // Limpiar metadatos del editor del contenido antes de guardar
+    const cleanContent = { ...content };
+    delete cleanContent._draftLabel;
+    delete cleanContent._draftNotes;
+
+    const [result] = await db.query(
+      `INSERT INTO landing_versions (label, notes, status, content, created_by) VALUES (?, ?, 'draft', ?, ?)`,
+      [label, notes, JSON.stringify(cleanContent), autor]
+    );
+
+    const draftId = result.insertId;
+    console.log(`[Versions] Borrador #${draftId} creado por ${autor}: "${label}"`);
+    res.json({ success: true, draftId, label, message: 'Borrador guardado. La landing pública no ha cambiado.' });
+  } catch (error) {
+    console.error('[Versions] Error POST /api/landing/draft:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar borrador' });
+  }
+});
+
+// POST /api/landing/publish/:id
+// Publica una versión específica:
+//   1. Archiva la versión publicada actual (si existe)
+//   2. Marca la versión target como 'published'
+//   3. Actualiza landing_texts/images para backward compat
+//   4. Actualiza landing-content.json
+// Requiere autenticación de admin.
+app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const { id } = req.params;
+    const autor   = req.usuario?.email || 'admin';
+
+    // 1. Verificar que la versión existe y está en estado válido
+    const [rows] = await conn.query(
+      `SELECT id, label, status, content FROM landing_versions WHERE id = ?`,
+      [id]
+    );
+    if (rows.length === 0) {
+      conn.release();
+      return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+    }
+    const version = rows[0];
+    if (version.status === 'archived') {
+      // Permitir rollback desde archivado — continuar igual
+    }
+
+    const content = typeof version.content === 'string'
+      ? JSON.parse(version.content)
+      : version.content;
+
+    await conn.beginTransaction();
+
+    // 2. Archivar la versión publicada actual
+    await conn.query(
+      `UPDATE landing_versions SET status = 'archived' WHERE status = 'published' AND id != ?`,
+      [id]
+    );
+
+    // 3. Publicar la versión target
+    await conn.query(
+      `UPDATE landing_versions SET status = 'published', published_at = NOW(), published_by = ? WHERE id = ?`,
+      [autor, id]
+    );
+
+    // 4. Actualizar landing_texts / landing_images para backward compat
+    const { texts, images } = contentToRows(content);
+
+    await conn.query('DELETE FROM landing_texts');
+    await conn.query('DELETE FROM landing_images');
+
+    for (const t of texts) {
+      await conn.query(
+        `INSERT INTO landing_texts (section_slug, item_index, clave, valor) VALUES (?, ?, ?, ?)`,
+        [t.section_slug, t.item_index, t.clave, t.valor]
+      );
+    }
+    for (const img of images) {
+      await conn.query(
+        `INSERT INTO landing_images (section_slug, item_index, clave, url) VALUES (?, ?, ?, ?)`,
+        [img.section_slug, img.item_index, img.clave, img.url]
+      );
+    }
+
+    await conn.commit();
+
+    // 5. Actualizar landing-content.json
+    const meta = {
+      ultimaActualizacion: new Date().toISOString(),
+      actualizadoPor: autor,
+      versionId: Number(id),
+      versionLabel: version.label,
+    };
+    fs.writeFileSync(LANDING_CONTENT_PATH, JSON.stringify({ ...content, _meta: meta }, null, 2), 'utf-8');
+
+    console.log(`[Versions] Versión #${id} ("${version.label}") publicada por ${autor}`);
+    res.json({
+      success: true,
+      message: `Versión "${version.label}" publicada exitosamente. La landing pública ya muestra el nuevo contenido.`,
+      publishedId: Number(id),
+      label: version.label,
+      publishedAt: new Date().toISOString(),
+      publishedBy: autor,
+    });
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    console.error('[Versions] Error POST /api/landing/publish/:id:', error);
+    res.status(500).json({ success: false, error: 'Error al publicar versión' });
+  } finally {
+    conn.release();
+  }
+});
+
+// DELETE /api/landing/versions/:id
+// Elimina un borrador. No se pueden eliminar versiones publicadas ni archivadas.
+// Requiere autenticación de admin.
+app.delete('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.query(
+      `SELECT id, label, status FROM landing_versions WHERE id = ?`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+
+    if (rows[0].status === 'published') {
+      return res.status(409).json({ success: false, error: 'No se puede eliminar la versión publicada actualmente.' });
+    }
+
+    await db.query(`DELETE FROM landing_versions WHERE id = ?`, [id]);
+    console.log(`[Versions] Versión #${id} ("${rows[0].label}") eliminada`);
+    res.json({ success: true, message: `Versión "${rows[0].label}" eliminada.` });
+  } catch (error) {
+    console.error('[Versions] Error DELETE /api/landing/versions/:id:', error);
+    res.status(500).json({ success: false, error: 'Error al eliminar versión' });
+  }
+});
+
+// ==============================================================
+// FIN MÓDULO 5
+// ==============================================================
+
+// ==============================================================
+// MÓDULO 6 — ORDEN DE SECCIONES (landing_structure)
+// ==============================================================
+
+// SECCIONES POR DEFECTO (refleja el orden actual de Home.jsx)
+const DEFAULT_SECTION_STRUCTURE = [
+  { section_slug: 'hero',           orden: 10,  visible: 1 },
+  { section_slug: 'partidos',       orden: 20,  visible: 1 },
+  { section_slug: 'deportes',       orden: 30,  visible: 1 },
+  { section_slug: 'ranking',        orden: 40,  visible: 1 },
+  { section_slug: 'estadisticas',   orden: 50,  visible: 1 },
+  { section_slug: 'cta',            orden: 60,  visible: 1 },
+  { section_slug: 'docentes',       orden: 70,  visible: 1 },
+  { section_slug: 'novedades',      orden: 80,  visible: 1 },
+  { section_slug: 'patrocinadores', orden: 90,  visible: 1 },
+  { section_slug: 'inscripcion',    orden: 100, visible: 1 },
+  { section_slug: 'galeria',        orden: 110, visible: 1 },
+];
+
+// GET /api/landing/structure
+// Público — la landing pública lo consume para ordenar secciones.
+// Si la tabla está vacía devuelve los valores por defecto.
+app.get('/api/landing/structure', async (req, res) => {
+  try {
+    // Cache: 60 s browser + stale-while-revalidate 120 s (el orden de secciones cambia poco)
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+
+    const [rows] = await db.query(
+      `SELECT section_slug, orden, visible FROM landing_structure ORDER BY orden ASC`
+    );
+
+    // Si la tabla no tiene datos, devolver defaults y no romperse
+    if (rows.length === 0) {
+      return res.json({ success: true, source: 'defaults', sections: DEFAULT_SECTION_STRUCTURE });
+    }
+
+    // Mezclar: lo que hay en DB + defaults para secciones no registradas
+    const dbSlugs = new Set(rows.map(r => r.section_slug));
+    const missing = DEFAULT_SECTION_STRUCTURE.filter(d => !dbSlugs.has(d.section_slug));
+    const all = [...rows, ...missing].sort((a, b) => a.orden - b.orden);
+
+    res.json({ success: true, source: 'db', sections: all });
+  } catch (error) {
+    console.error('[Structure] Error GET /api/landing/structure:', error);
+    // Fallback seguro: nunca romper la landing por fallo de estructura
+    res.json({ success: true, source: 'fallback', sections: DEFAULT_SECTION_STRUCTURE });
+  }
+});
+
+// POST /api/landing/structure
+// Admin only — guarda el nuevo orden de secciones.
+// Body: { sections: [{section_slug, orden, visible}] }
+app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const { sections } = req.body;
+    if (!Array.isArray(sections) || sections.length === 0) {
+      conn.release();
+      return res.status(400).json({ success: false, error: 'Se esperaba sections: [{section_slug, orden, visible}]' });
+    }
+
+    await conn.beginTransaction();
+    for (const s of sections) {
+      await conn.query(
+        `INSERT INTO landing_structure (section_slug, orden, visible)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE orden = VALUES(orden), visible = VALUES(visible)`,
+        [s.section_slug, Number(s.orden), s.visible !== undefined ? (s.visible ? 1 : 0) : 1]
+      );
+    }
+    await conn.commit();
+
+    const autor = req.usuario?.email || 'admin';
+    console.log(`[Structure] Orden de ${sections.length} secciones actualizado por ${autor}`);
+    res.json({ success: true, message: `Orden de ${sections.length} secciones guardado.`, sections: sections.length });
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    console.error('[Structure] Error POST /api/landing/structure:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar estructura' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ==============================================================
+// FIN MÓDULO 6
+// ==============================================================
+
+// ==============================================================
+// FIN MÓDULO 3
+// ==============================================================
+
 // Iniciar servidor
 const server = app.listen(PORT, () => {
   console.log('');
@@ -6315,6 +7361,28 @@ server.on('error', (error) => {
 // ==================== ENDPOINTS DE INSCRIPCIONES Y PAGOS ====================
 
 /**
+ * PUT /api/admin/alumnos/:dni/notas
+ * Guardar observación/nota del alumno
+ */
+app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
+  try {
+    const { dni } = req.params;
+    const { notas } = req.body;
+    await db.query(
+      'UPDATE alumnos SET notas_pago = ?, updated_at = NOW() WHERE dni = ?',
+      [notas || null, dni]
+    );
+    const cacheKey = getCacheKey('consultas', dni);
+    cache.del(cacheKey);
+    console.log(`📝 Observación actualizada para DNI ${dni}`);
+    res.json({ success: true, message: 'Observación guardada correctamente' });
+  } catch (error) {
+    console.error('❌ Error al guardar nota:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar la observación' });
+  }
+});
+
+/**
  * GET /api/admin/inscripciones
  * Obtener inscripciones con filtros: pendientes, confirmadas, todas
  * Query params: estado_pago (pendiente|confirmado|todos)
@@ -6343,6 +7411,7 @@ app.get('/api/admin/inscripciones', async (req, res) => {
         a.dni_frontal_url,
         a.dni_reverso_url,
         a.foto_carnet_url,
+        a.notas_pago,
         a.created_at,
         a.updated_at,
         COUNT(i.inscripcion_id) as total_inscripciones,

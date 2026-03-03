@@ -1,0 +1,353 @@
+{
+  "cta": {
+    "imagen": "https://soccerclub.axiomthemes.com/wp-content/uploads/2024/10/img-002-copyright@2x.jpg",
+    "titulo": "¡Experimente la verdadera alegría de los juegos de fútbol profesional!",
+    "subtitulo": "bienvenido",
+    "botonTexto": "Inscríbete",
+    "botonEnlace": "/inscripcion"
+  },
+  "hero": {
+    "slides": [
+      {
+        "id": 1,
+        "image": "https://soccerclub.axiomthemes.com/wp-content/uploads/2024/10/slider_1-1-copyright.jpg",
+        "sport": "Fútbol",
+        "title": "Forjando\ncampeones",
+        "accent": "#E03821",
+        "subtitle": "Academia de Fútbol",
+        "description": "Entrenamiento profesional para todas las edades con metodología de alto rendimiento."
+      },
+      {
+        "id": 2,
+        "image": "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=1920&q=80",
+        "sport": "Básquet",
+        "title": "Alcanza nuevas\nalturas",
+        "accent": "#FF6B35",
+        "subtitle": "Programa Competitivo",
+        "description": "Desarrolla técnica, estrategia y trabajo en equipo con nuestros entrenadores certificados."
+      },
+      {
+        "id": 3,
+        "image": "https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&w=1920&q=80",
+        "sport": "Vóley",
+        "title": "Potencia tu\njuego en red",
+        "accent": "#4ECDC4",
+        "subtitle": "Formación Integral",
+        "description": "Perfecciona tu saque, remate y bloqueo con metodología de alto rendimiento."
+      },
+      {
+        "id": 4,
+        "image": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=1920&q=80",
+        "sport": "Fútbol Femenino",
+        "title": "El talento no\ntiene género",
+        "accent": "#E91E8C",
+        "subtitle": "Empoderamiento Deportivo",
+        "description": "Programa exclusivo para desarrollar futbolistas de élite con pasión y determinación."
+      },
+      {
+        "id": 5,
+        "image": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1920&q=80",
+        "sport": "Funcional Mixto",
+        "title": "Supera tus\nlímites",
+        "accent": "#9B59B6",
+        "subtitle": "Entrenamiento de Alto Impacto",
+        "description": "Sesiones intensivas que combinan fuerza, resistencia y agilidad para todos los niveles."
+      },
+      {
+        "id": 6,
+        "image": "https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=1920&q=80",
+        "sport": "Mamas Fit",
+        "title": "Bienestar y\nenergía",
+        "accent": "#FF69B4",
+        "subtitle": "Programa Especial Mamás",
+        "description": "Rutinas diseñadas para mamás activas que buscan mantenerse en forma y saludables."
+      }
+    ]
+  },
+  "galeria": {
+    "items": [
+      {
+        "alt": "Entrenamiento de fútbol",
+        "imagen": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800"
+      },
+      {
+        "alt": "Niños jugando fútbol",
+        "imagen": "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800"
+      },
+      {
+        "alt": "Equipo de fútbol",
+        "imagen": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800"
+      },
+      {
+        "alt": "Copa de campeones",
+        "imagen": "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=800"
+      },
+      {
+        "alt": "Partido de fútbol",
+        "imagen": "https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800"
+      },
+      {
+        "alt": "Niños celebrando",
+        "imagen": "https://images.unsplash.com/photo-1526232761682-d26e03ac148e?w=800"
+      }
+    ],
+    "botonTexto": "Síguenos en Facebook"
+  },
+  "general": {
+    "facebook": "https://www.facebook.com/Jaguarezdegalvez",
+    "whatsapp": "https://wa.me/51973324460",
+    "copyright": "© 2026 Jaguares F.C.",
+    "nombreClub": "JAGUARES"
+  },
+  "deportes": [
+    {
+      "id": 1,
+      "fecha": "Inscripciones Abiertas",
+      "imagen": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=800&q=80",
+      "titulo": "Fútbol - Forja tu camino hacia el éxito",
+      "categoria": "Academia",
+      "destacado": true,
+      "descripcion": "Entrenamiento profesional con metodología de alto rendimiento para todas las edades. Desarrolla técnica, táctica y valores deportivos."
+    },
+    {
+      "id": 2,
+      "fecha": "Lunes y Miércoles",
+      "imagen": "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=800&q=80",
+      "titulo": "Básquet - Alcanza nuevas alturas",
+      "categoria": "Programa",
+      "destacado": false,
+      "descripcion": "Mejora tu juego en equipo y habilidades técnicas con nuestros entrenadores certificados."
+    },
+    {
+      "id": 3,
+      "fecha": "Martes y Jueves",
+      "imagen": "https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&w=800&q=80",
+      "titulo": "Vóley - Potencia tu juego en red",
+      "categoria": "Formación",
+      "destacado": false,
+      "descripcion": "Perfecciona tu saque, remate y bloqueo con sesiones intensivas de entrenamiento."
+    },
+    {
+      "id": 4,
+      "fecha": "Horarios Flexibles",
+      "imagen": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=800&q=80",
+      "titulo": "Funcional Mixto - Supera tus límites",
+      "categoria": "Bienestar",
+      "destacado": false,
+      "descripcion": "Sesiones que combinan fuerza, resistencia y agilidad para transformar tu condición física."
+    }
+  ],
+  "docentes": [
+    {
+      "id": 1,
+      "foto": "/assets/Leonardo - Profesores Jaguares 2026-2.jpg.jpeg",
+      "nombre": "Leonardo",
+      "especialidad": "Fútbol"
+    },
+    {
+      "id": 2,
+      "foto": "/assets/Oscar - Profesores Jaguares 2026-3.jpg.jpeg",
+      "nombre": "Oscar",
+      "especialidad": "Fútbol"
+    },
+    {
+      "id": 3,
+      "foto": "/assets/Phaterson - Profesores Jaguares 2026-4.jpg.jpeg",
+      "nombre": "Phaterson",
+      "especialidad": "Funcional"
+    },
+    {
+      "id": 4,
+      "foto": "/assets/Rafael - Profesores Jaguares 2026.jpg.jpeg",
+      "nombre": "Rafael",
+      "especialidad": "Vóley"
+    }
+  ],
+  "partidos": [
+    {
+      "id": 1,
+      "liga": "primera división",
+      "sede": "bentleigh",
+      "fecha": "25 de agosto de 2024",
+      "season": "2023",
+      "resultado": "8:00 pm",
+      "equipoLocal": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2023/09/team1-copyright.png",
+        "nombre": "Club de Fútbol"
+      },
+      "equipoVisita": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team2-copyright.png",
+        "nombre": "Real Madrid"
+      }
+    },
+    {
+      "id": 2,
+      "liga": "primera división",
+      "sede": "Kensington",
+      "fecha": "28 de septiembre de 2024",
+      "season": "2023",
+      "resultado": "1 - 0",
+      "equipoLocal": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team3-copyright.png",
+        "nombre": "Liverpool"
+      },
+      "equipoVisita": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team4-copyright.png",
+        "nombre": "FC Barcelona"
+      }
+    },
+    {
+      "id": 3,
+      "liga": "primera división",
+      "sede": "Nueva York",
+      "fecha": "18 de julio de 2024",
+      "season": "2023",
+      "resultado": "2 - 3",
+      "equipoLocal": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team5-copyright.png",
+        "nombre": "Chelsea"
+      },
+      "equipoVisita": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team6-copyright.png",
+        "nombre": "Manchester"
+      }
+    },
+    {
+      "id": 4,
+      "liga": "primera división",
+      "sede": "bentleigh",
+      "fecha": "26 de octubre de 2024",
+      "season": "2023",
+      "resultado": "11:40 am",
+      "equipoLocal": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2023/09/team1-copyright.png",
+        "nombre": "Club de Fútbol"
+      },
+      "equipoVisita": {
+        "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team7-copyright.png",
+        "nombre": "FC Bayern"
+      }
+    }
+  ],
+  "novedades": {
+    "items": [
+      {
+        "id": 1,
+        "alt": "Inscripciones Abiertas 2026",
+        "fecha": "15 de febrero de 2026",
+        "enlace": "/inscripcion",
+        "imagen": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=890&h=664&q=80",
+        "titulo": "¡Inscripciones abiertas para el período 2026!",
+        "categoria": "Inscripciones",
+        "comentarios": "24",
+        "titulo_href": "/inscripcion",
+        "categoria_href": "/inscripcion"
+      },
+      {
+        "id": 2,
+        "alt": "Campeonato Regional",
+        "fecha": "10 de febrero de 2026",
+        "enlace": "#",
+        "imagen": "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?auto=format&fit=crop&w=890&h=664&q=80",
+        "titulo": "Categoría Sub-12 clasifica al Campeonato Regional",
+        "categoria": "Torneos",
+        "comentarios": "18",
+        "titulo_href": "#",
+        "categoria_href": "#"
+      },
+      {
+        "id": 3,
+        "alt": "Nuevos Entrenadores",
+        "fecha": "5 de febrero de 2026",
+        "enlace": "#",
+        "imagen": "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=890&h=664&q=80",
+        "titulo": "Bienvenida a nuestros nuevos entrenadores certificados",
+        "categoria": "Staff",
+        "comentarios": "12",
+        "titulo_href": "#",
+        "categoria_href": "#"
+      },
+      {
+        "id": 4,
+        "alt": "Clases de Funcional",
+        "fecha": "1 de febrero de 2026",
+        "enlace": "#",
+        "imagen": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=890&h=664&q=80",
+        "titulo": "Nuevos horarios de Entrenamiento Funcional Mixto",
+        "categoria": "Programas",
+        "comentarios": "8",
+        "titulo_href": "#",
+        "categoria_href": "#"
+      }
+    ],
+    "titulo": "Últimas Novedades",
+    "subtitulo": "Academia Jaguares"
+  },
+  "tipografia": {
+    "pesoTitulos": "700",
+    "fuenteCuerpo": "DM Sans",
+    "fuenteTitulos": "Inter Tight"
+  },
+  "estadisticas": {
+    "anos": "25+",
+    "gente": "90+",
+    "trofeos": "256",
+    "partidos": "2548"
+  },
+  "patrocinadores": [
+    {
+      "id": 1,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "NIKE"
+    },
+    {
+      "id": 2,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "ADIDAS"
+    },
+    {
+      "id": 3,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "PUMA"
+    },
+    {
+      "id": 4,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "REEBOK"
+    },
+    {
+      "id": 5,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "NEW BALANCE"
+    },
+    {
+      "id": 6,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "UMBRO"
+    },
+    {
+      "id": 7,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "UNDER ARMOUR"
+    },
+    {
+      "id": 8,
+      "enlace": "#",
+      "imagen": "",
+      "nombre": "MIZUNO"
+    }
+  ],
+  "_meta": {
+    "ultimaActualizacion": "2026-03-03T20:19:33.052Z",
+    "actualizadoPor": "admin",
+    "versionId": 5,
+    "versionLabel": "Publicación · 3/3/2026 03:19 p. m."
+  }
+}
