@@ -69,6 +69,7 @@ async function initDatabase() {
 initDatabase();
 
 const app = express();
+app.set('trust proxy', 1); // Detrás de Cloudflare/nginx proxy
 const PORT = process.env.PORT || 3002;
 
 // ==================== CONFIGURACIÓN ACADEMIA DEPORTIVA ====================
@@ -5861,6 +5862,10 @@ app.get('/api/landing/structure', async (req, res) => {
 
     res.json({ success: true, source: 'db', sections: all });
   } catch (error) {
+    // Si la tabla no existe, devolver defaults sin llenar logs de errores
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      return res.json({ success: true, source: 'defaults', sections: DEFAULT_SECTION_STRUCTURE });
+    }
     console.error('[Structure] Error GET /api/landing/structure:', error);
     // Fallback seguro: nunca romper la landing por fallo de estructura
     res.json({ success: true, source: 'fallback', sections: DEFAULT_SECTION_STRUCTURE });
