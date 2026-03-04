@@ -7385,6 +7385,30 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
 /**
  * GET /api/admin/inscripciones
  * Obtener inscripciones con filtros: pendientes, confirmadas, todas
+  /**
+   * POST /api/admin/alumnos/:dni/notas
+/**
+ * Guardar observación/nota del alumno (compatibilidad)
+ */
+  app.post('/api/admin/alumnos/:dni/notas', async (req, res) => {
+    try {
+      const { dni } = req.params;
+      const { notas } = req.body;
+      await db.query(
+        'UPDATE alumnos SET notas_pago = ?, updated_at = NOW() WHERE dni = ?',
+        [notas || null, dni]
+      );
+      const cacheKey = getCacheKey('consultas', dni);
+      cache.del(cacheKey);
+      console.log(`📝 Observación actualizada para DNI ${dni} (POST)`);
+      res.json({ success: true, message: 'Observación guardada correctamente' });
+    } catch (error) {
+      console.error('❌ Error al guardar nota (POST):', error);
+      res.status(500).json({ success: false, message: 'Error al guardar observación' });
+    }
+  });
+
+/**
  * Query params: estado_pago (pendiente|confirmado|todos)
  */
 app.get('/api/admin/inscripciones', async (req, res) => {
