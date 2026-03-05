@@ -367,7 +367,7 @@ app.get('/api/horarios', async (req, res) => {
 // Endpoint para inscribir a múltiples horarios
 app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) => {
   try {
-    const { alumno, horarios } = req.body;
+    const { alumno, horarios, comprobante } = req.body;
     
     console.log('📝 ==================== INSCRIPCIÓN MÚLTIPLE ====================');
     console.log('👤 ALUMNO:', JSON.stringify(alumno, null, 2));
@@ -401,6 +401,29 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         error: 'Máximo 10 horarios por inscripción',
         message: 'Por favor, seleccione máximo 10 horarios. Si necesita más, contacte al administrador.'
       });
+    }
+    
+    // ⚠️ Validar número de operación duplicado (anti-fraude: evitar pasar el mismo pago)
+    if (comprobante && comprobante.numero_operacion && db) {
+      const numOp = comprobante.numero_operacion.trim();
+      // No validar duplicados para "S/N" o similares (pago en efectivo)
+      if (numOp && numOp.toUpperCase() !== 'S/N' && numOp.toUpperCase() !== 'SN' && numOp !== '-') {
+        const [existentes] = await db.query(
+          `SELECT a.dni, a.nombres, a.apellido_paterno 
+           FROM alumnos a 
+           WHERE a.numero_operacion = ? AND a.dni != ?`,
+          [numOp, alumno.dni]
+        );
+        if (existentes.length > 0) {
+          const otro = existentes[0];
+          console.warn(`⚠️ DUPLICADO DE PAGO: Nro operación "${numOp}" ya usado por ${otro.nombres} ${otro.apellido_paterno} (DNI: ${otro.dni})`);
+          return res.status(409).json({
+            success: false,
+            error: 'Número de operación duplicado',
+            message: `Este número de operación ya fue registrado por otro alumno (DNI: ${otro.dni.substring(0, 4)}****). Si crees que es un error, contacta al administrador.`
+          });
+        }
+      }
     }
     
     // ==================== GUARDAR EN MYSQL PRIMERO (MySQL-First Approach) ====================
@@ -664,6 +687,22 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         await conn.commit();
         conn.release();
 
+        // Guardar número de operación en tabla alumnos si viene con comprobante
+        if (comprobante && comprobante.numero_operacion) {
+          const numOp = comprobante.numero_operacion.trim();
+          if (numOp) {
+            try {
+              await db.query(
+                `UPDATE alumnos SET numero_operacion = ?, updated_at = NOW() WHERE alumno_id = ?`,
+                [numOp, alumnoId]
+              );
+              console.log(`✅ Número de operación guardado: ${numOp}`);
+            } catch (numOpErr) {
+              console.error('❌ Error guardando número de operación:', numOpErr.message);
+            }
+          }
+        }
+
         inscripcionData = {
           alumnoId,
           alumnoCreado,
@@ -751,6 +790,42 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
               console.log('✅ [BG] URLs de documentos actualizadas en MySQL');
             } catch (e) {
               console.error('❌ [BG] Error actualizando URLs:', e.message);
+            }
+          }
+          
+          // ====== SUBIR COMPROBANTE DESPUÉS DE QUE LA INSCRIPCIÓN SE SINCRONIZÓ ======
+          // Esto evita race condition: carpeta ya existe + PAGOS ya tiene el código
+          if (comprobante && comprobante.imagen && comprobante.nombre_archivo) {
+            console.log('📸 [BG] Subiendo comprobante encadenado tras inscripción exitosa...');
+            try {
+              const compResp = await Promise.race([
+                fetch(APPS_SCRIPT_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    token: APPS_SCRIPT_TOKEN,
+                    action: 'subir_comprobante',
+                    codigo_operacion: codigoOperacion,
+                    dni: alumno.dni,
+                    alumno: `${alumno.nombres} ${alumno.apellidos || alumno.apellidoPaterno || ''}`,
+                    imagen: comprobante.imagen,
+                    nombre_archivo: comprobante.nombre_archivo,
+                    metodo_pago: comprobante.metodo_pago || 'Plin/QR'
+                  })
+                }).then(r => r.json()),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout comprobante 3min')), 180000))
+              ]);
+              if (compResp.success && compResp.url_comprobante && db) {
+                await db.query(
+                  `UPDATE alumnos SET comprobante_pago_url = ? WHERE alumno_id = ?`,
+                  [compResp.url_comprobante, inscripcionData.alumnoId]
+                );
+                console.log(`✅ [BG] Comprobante subido a Drive: ${compResp.url_comprobante}`);
+              } else {
+                console.error('❌ [BG] Apps Script error al subir comprobante encadenado:', compResp.error);
+              }
+            } catch (compErr) {
+              console.error('❌ [BG] Falló subida de comprobante encadenado:', compErr.message);
             }
           }
         } else {
@@ -7416,6 +7491,56 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
 /**
  * Query params: estado_pago (pendiente|confirmado|todos)
  */
+
+/**
+ * GET /api/admin/buscar-numero-operacion
+ * Buscar pagos por número de operación (anti-fraude)
+ */
+app.get('/api/admin/buscar-numero-operacion', async (req, res) => {
+  try {
+    const { numero_operacion } = req.query;
+    if (!numero_operacion || numero_operacion.trim().length < 2) {
+      return res.status(400).json({ success: false, error: 'Ingrese al menos 2 caracteres' });
+    }
+    const numOp = numero_operacion.trim();
+    const [resultados] = await db.query(`
+      SELECT 
+        a.dni,
+        a.nombres,
+        CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos,
+        a.numero_operacion,
+        a.estado_pago,
+        a.comprobante_pago_url,
+        a.monto_pago,
+        a.fecha_pago,
+        a.created_at as fecha_inscripcion,
+        GROUP_CONCAT(DISTINCT d.nombre SEPARATOR ', ') as deportes
+      FROM alumnos a
+      LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id
+      LEFT JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE a.numero_operacion LIKE ?
+      GROUP BY a.alumno_id
+      ORDER BY a.created_at DESC
+      LIMIT 20
+    `, [`%${numOp}%`]);
+    
+    // Verificar si hay duplicados exactos
+    const exactos = resultados.filter(r => r.numero_operacion === numOp);
+    const esDuplicado = exactos.length > 1;
+    
+    res.json({ 
+      success: true, 
+      resultados,
+      total: resultados.length,
+      es_duplicado: esDuplicado,
+      mensaje_duplicado: esDuplicado ? `⚠️ ALERTA: El número de operación "${numOp}" está registrado por ${exactos.length} alumnos diferentes` : null
+    });
+  } catch (error) {
+    console.error('❌ Error buscando número de operación:', error);
+    res.status(500).json({ success: false, error: 'Error al buscar' });
+  }
+});
+
 app.get('/api/admin/inscripciones', async (req, res) => {
   try {
     const { estado_pago = 'todos', buscar = '', limite = 100, pagina = 1 } = req.query;
