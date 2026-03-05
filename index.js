@@ -406,8 +406,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
     // ⚠️ Validar número de operación duplicado (anti-fraude: evitar pasar el mismo pago)
     if (comprobante && comprobante.numero_operacion && db) {
       const numOp = comprobante.numero_operacion.trim();
-      // No validar duplicados para "S/N" o similares (pago en efectivo)
-      if (numOp && numOp.toUpperCase() !== 'S/N' && numOp.toUpperCase() !== 'SN' && numOp !== '-') {
+      // No validar duplicados para valores genéricos como "-"
+      if (numOp && numOp !== '-') {
         const [existentes] = await db.query(
           `SELECT a.dni, a.nombres, a.apellido_paterno 
            FROM alumnos a 
