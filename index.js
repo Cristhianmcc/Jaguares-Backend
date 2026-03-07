@@ -403,6 +403,15 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       });
     }
     
+    // ⚠️ Validar que si viene comprobante tenga número de operación (obligatorio)
+    if (comprobante && !comprobante.numero_operacion?.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Número de operación requerido',
+        message: 'Debes ingresar el número de operación de tu comprobante de pago.'
+      });
+    }
+
     // ⚠️ Validar número de operación duplicado (anti-fraude: evitar pasar el mismo pago)
     if (comprobante && comprobante.numero_operacion && db) {
       const numOp = comprobante.numero_operacion.trim();
