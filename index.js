@@ -1742,13 +1742,21 @@ app.post('/api/subir-comprobante', async (req, res) => {
 app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
   try {
     const { dni } = req.params;
-    const { imagen, nombre_archivo, metodo_pago = 'Transferencia bancaria' } = req.body;
+    const { imagen, nombre_archivo, metodo_pago = 'Transferencia bancaria', numero_operacion } = req.body;
     
     // Validaciones
     if (!imagen || !nombre_archivo) {
       return res.status(400).json({
         success: false,
         error: 'Datos incompletos. Se requiere: imagen y nombre_archivo'
+      });
+    }
+
+    if (!numero_operacion || !numero_operacion.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Número de operación requerido',
+        message: 'Debes ingresar el número de operación de tu comprobante de pago.'
       });
     }
     
@@ -1809,12 +1817,12 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
     const urlComprobante = data.url_comprobante;
     console.log('✅ Comprobante subido a Drive:', urlComprobante);
     
-    // Actualizar MySQL con la URL del comprobante
+    // Actualizar MySQL con la URL del comprobante y el número de operación
     await db.query(
-      'UPDATE alumnos SET comprobante_pago_url = ?, updated_at = NOW() WHERE dni = ?',
-      [urlComprobante, dni]
+      'UPDATE alumnos SET comprobante_pago_url = ?, numero_operacion = ?, updated_at = NOW() WHERE dni = ?',
+      [urlComprobante, numero_operacion.trim(), dni]
     );
-    console.log('✅ MySQL actualizado con URL del comprobante');
+    console.log('✅ MySQL actualizado con URL del comprobante y número de operación');
     
     // Invalidar caché
     invalidateDNICache(dni);
