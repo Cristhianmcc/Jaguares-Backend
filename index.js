@@ -7560,7 +7560,7 @@ app.get('/api/admin/buscar-numero-operacion', async (req, res) => {
 
 app.get('/api/admin/inscripciones', async (req, res) => {
   try {
-    const { estado_pago = 'todos', buscar = '', limite = 100, pagina = 1 } = req.query;
+    const { estado_pago = 'todos', buscar = '', limite = 500, pagina = 1 } = req.query;
     
     let query = `
       SELECT 
