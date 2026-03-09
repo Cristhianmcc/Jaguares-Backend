@@ -403,6 +403,15 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       });
     }
     
+    // ⚠️ Validar que el comprobante de pago sea obligatorio
+    if (!comprobante) {
+      return res.status(400).json({
+        success: false,
+        error: 'Comprobante de pago requerido',
+        message: 'Debes subir el comprobante de pago con el número de operación para completar la inscripción.'
+      });
+    }
+
     // ⚠️ Validar que si viene comprobante tenga número de operación (obligatorio)
     if (comprobante && !comprobante.numero_operacion?.trim()) {
       return res.status(400).json({
@@ -453,10 +462,17 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         
         let alumnoId;
         let alumnoCreado = false;
+        let alumnoDBData = null;
         
         if (alumnoRows.length > 0) {
           alumnoId = alumnoRows[0].alumno_id;
           console.log(`✅ Alumno encontrado en MySQL: ID ${alumnoId}`);
+          // Traer datos reales de la BD para retornarlos en la respuesta
+          const [alumnoReal] = await conn.query(
+            'SELECT nombres, apellido_paterno, apellido_materno FROM alumnos WHERE alumno_id = ?',
+            [alumnoId]
+          );
+          if (alumnoReal.length > 0) alumnoDBData = alumnoReal[0];
         } else {
           // Crear nuevo alumno (dentro de la transacción — se revierte si algo falla)
           alumnoCreado = true;
@@ -715,6 +731,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         inscripcionData = {
           alumnoId,
           alumnoCreado,
+          alumnoDBData,
           inscripcionIds: inscripcionesIds,
           success: true
         };
@@ -854,9 +871,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       alumno: {
         alumno_id: inscripcionData.alumnoId,
         dni: alumno.dni,
-        nombres: alumno.nombres,
-        apellido_paterno: alumno.apellidoPaterno,
-        apellido_materno: alumno.apellidoMaterno
+        nombres: inscripcionData.alumnoDBData ? inscripcionData.alumnoDBData.nombres : alumno.nombres,
+        apellido_paterno: inscripcionData.alumnoDBData ? inscripcionData.alumnoDBData.apellido_paterno : (alumno.apellidoPaterno || ''),
+        apellido_materno: inscripcionData.alumnoDBData ? inscripcionData.alumnoDBData.apellido_materno : (alumno.apellidoMaterno || '')
       },
       inscripciones: inscripcionData.inscripcionIds ? 
         inscripcionData.inscripcionIds.map(ins => ({ 
@@ -1515,7 +1532,43 @@ app.get('/api/consultar/:dni', async (req, res) => {
           horarios: horariosCompletos,
           source: 'mysql'
         };
-        
+
+        // ✅ AUTO-REPARAR: Si faltan URLs de documentos, consultarlas en Apps Script y guardarlas
+        const faltanURLs = !alumno.dni_frontal_url || !alumno.dni_reverso_url || !alumno.foto_carnet_url;
+        if (faltanURLs) {
+          try {
+            const appsUrl = `${APPS_SCRIPT_URL}?action=consultar_inscripcion&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}&dni=${encodeURIComponent(dni)}`;
+            const appsResp = await Promise.race([
+              fetch(appsUrl).then(r => r.json()),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+            ]);
+            if (appsResp && appsResp.alumno) {
+              const u = appsResp.alumno;
+              const frontal = u.dni_frontal_url || u.dniFrontalUrl || null;
+              const reverso = u.dni_reverso_url || u.dniReversoUrl || null;
+              const carnet = u.foto_carnet_url || u.fotoCarnetUrl || null;
+              if (frontal || reverso || carnet) {
+                // Guardar en MySQL para la próxima vez
+                await db.query(
+                  `UPDATE alumnos SET
+                    dni_frontal_url = COALESCE(dni_frontal_url, ?),
+                    dni_reverso_url = COALESCE(dni_reverso_url, ?),
+                    foto_carnet_url = COALESCE(foto_carnet_url, ?)
+                   WHERE alumno_id = ?`,
+                  [frontal, reverso, carnet, alumno.alumno_id]
+                );
+                // Incluir en la respuesta actual
+                resultado.alumno.dni_frontal_url = resultado.alumno.dni_frontal_url || frontal;
+                resultado.alumno.dni_reverso_url = resultado.alumno.dni_reverso_url || reverso;
+                resultado.alumno.foto_carnet_url = resultado.alumno.foto_carnet_url || carnet;
+                console.log(`✅ URLs de documentos recuperadas de Apps Script para DNI ${dni}`);
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ No se pudieron recuperar URLs de Apps Script para DNI ${dni}:`, e.message);
+          }
+        }
+
         // Cachear resultado
         cache.set(cacheKey, resultado, CACHE_TTL.consultas);
         console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
