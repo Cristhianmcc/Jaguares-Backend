@@ -3672,6 +3672,7 @@ app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async 
             LEFT JOIN asistencias ast ON ast.alumno_id = a.alumno_id
                 AND ast.horario_id = ? AND ast.fecha = ?
             WHERE ih.horario_id = ?
+              AND i.estado = 'activa'
             ORDER BY a.apellido_paterno, a.nombres
         `, [horarioId, fechaHoy, horarioId]);
 
