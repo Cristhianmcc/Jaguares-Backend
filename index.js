@@ -3511,12 +3511,13 @@ app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => 
                 h.hora_inicio,
                 h.hora_fin,
                 h.cupo_maximo,
-                COALESCE(COUNT(ih.horario_id), 0) AS total_alumnos,
+                COALESCE(COUNT(DISTINCT CASE WHEN i.estado = 'activa' THEN ih.inscripcion_id END), 0) AS total_alumnos,
                 (SELECT COUNT(*) FROM asistencias ast WHERE ast.horario_id = pd.horario_id AND ast.fecha = ?) > 0 AS asistencia_hoy
             FROM profesor_deportes pd
             JOIN horarios h ON h.horario_id = pd.horario_id
             JOIN deportes d ON d.deporte_id = pd.deporte_id
             LEFT JOIN inscripcion_horarios ih ON ih.horario_id = pd.horario_id
+            LEFT JOIN inscripciones i ON i.inscripcion_id = ih.inscripcion_id
             WHERE pd.admin_id = ?
         `;
         const params = [fechaHoy, adminId];
