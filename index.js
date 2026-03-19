@@ -8070,13 +8070,14 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     }
     
     // Actualizar estado de pago en MySQL
+    // COALESCE preserva el numero_operacion que cargó el alumno si el admin no envía uno nuevo
     await db.query(`
       UPDATE alumnos 
       SET 
         estado_pago = 'confirmado',
         fecha_pago = NOW(),
         monto_pago = ?,
-        numero_operacion = ?,
+        numero_operacion = COALESCE(?, numero_operacion),
         notas_pago = ?,
         updated_at = NOW()
       WHERE dni = ?
