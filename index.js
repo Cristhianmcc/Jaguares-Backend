@@ -3292,6 +3292,110 @@ app.delete('/api/admin/asignaciones-docentes/:id', verificarAutenticacion, verif
     }
 });
 
+// GET /api/admin/docente-clases/:adminId — Clases asignadas a un docente con conteo de alumnos
+app.get('/api/admin/docente-clases/:adminId', verificarAutenticacion, verificarAdmin, async (req, res) => {
+    try {
+        const { adminId } = req.params;
+        const adminIdNum = parseInt(adminId, 10);
+        if (isNaN(adminIdNum) || adminIdNum <= 0) {
+            return res.status(400).json({ success: false, error: 'adminId inválido' });
+        }
+
+        const [rows] = await db.query(`
+            SELECT
+                GROUP_CONCAT(DISTINCT pd.horario_id ORDER BY pd.horario_id) AS horario_ids,
+                MIN(pd.horario_id) AS horario_id,
+                d.nombre AS deporte,
+                pd.categoria,
+                h.dia,
+                h.hora_inicio,
+                h.hora_fin,
+                COALESCE(COUNT(DISTINCT CASE WHEN i.estado = 'activa' THEN ih.inscripcion_id END), 0) AS total_alumnos
+            FROM profesor_deportes pd
+            JOIN horarios h ON h.horario_id = pd.horario_id
+            JOIN deportes d ON d.deporte_id = pd.deporte_id
+            LEFT JOIN inscripcion_horarios ih ON ih.horario_id = pd.horario_id
+            LEFT JOIN inscripciones i ON i.inscripcion_id = ih.inscripcion_id
+            WHERE pd.admin_id = ?
+            GROUP BY d.nombre, pd.categoria, h.dia, h.hora_inicio, h.hora_fin
+            ORDER BY FIELD(h.dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO'), h.hora_inicio
+        `, [adminIdNum]);
+
+        res.json({ success: true, clases: rows.map(r => ({
+            horario_id: r.horario_id,
+            horario_ids: r.horario_ids,
+            deporte: r.deporte,
+            categoria: r.categoria || 'General',
+            dia: r.dia,
+            hora_inicio: r.hora_inicio,
+            hora_fin: r.hora_fin,
+            total_alumnos: Number(r.total_alumnos)
+        })) });
+    } catch (error) {
+        console.error('Error en GET /api/admin/docente-clases:', error);
+        res.status(500).json({ success: false, error: 'Error al obtener clases del docente' });
+    }
+});
+
+// GET /api/admin/docente-clase-alumnos?horario_ids=1,2&fecha_inicio=X&fecha_fin=Y — Lista de alumnos con asistencia
+app.get('/api/admin/docente-clase-alumnos', verificarAutenticacion, verificarAdmin, async (req, res) => {
+    try {
+        const { horario_ids, fecha_inicio, fecha_fin } = req.query;
+        if (!horario_ids) {
+            return res.status(400).json({ success: false, error: 'Faltan horario_ids' });
+        }
+        const ids = horario_ids.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
+        if (ids.length === 0) {
+            return res.status(400).json({ success: false, error: 'horario_ids inválidos' });
+        }
+        const placeholders = ids.map(() => '?').join(',');
+
+        // Info del horario
+        const [[horario]] = await db.query(`
+            SELECT h.horario_id, d.nombre AS deporte, h.categoria, h.dia, h.hora_inicio, h.hora_fin
+            FROM horarios h JOIN deportes d ON d.deporte_id = h.deporte_id
+            WHERE h.horario_id = ?
+        `, [ids[0]]);
+
+        // Alumnos inscritos activos
+        const [alumnos] = await db.query(`
+            SELECT DISTINCT
+                a.alumno_id,
+                CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', a.apellido_materno) AS nombre_completo,
+                a.dni
+            FROM inscripciones i
+            JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
+            JOIN alumnos a ON a.alumno_id = i.alumno_id
+            WHERE ih.horario_id IN (${placeholders})
+              AND i.estado = 'activa'
+            ORDER BY nombre_completo
+        `, ids);
+
+        // Asistencias en el rango de fechas (si se proporcionan)
+        let asistencias = [];
+        if (fecha_inicio && fecha_fin) {
+            const [rows] = await db.query(`
+                SELECT ast.alumno_id, ast.fecha, ast.presente
+                FROM asistencias ast
+                WHERE ast.horario_id IN (${placeholders})
+                  AND ast.fecha BETWEEN ? AND ?
+                ORDER BY ast.fecha
+            `, [...ids, fecha_inicio, fecha_fin]);
+            asistencias = rows;
+        }
+
+        res.json({
+            success: true,
+            horario: horario || {},
+            alumnos,
+            asistencias
+        });
+    } catch (error) {
+        console.error('Error en GET /api/admin/docente-clase-alumnos:', error);
+        res.status(500).json({ success: false, error: 'Error al obtener alumnos de la clase' });
+    }
+});
+
 // GET /api/admin/horarios-disponibles?deporte_id=X&dia=Y
 app.get('/api/admin/horarios-disponibles', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
@@ -3504,20 +3608,25 @@ app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => 
 
         let query = `
             SELECT
-                pd.horario_id,
+                GROUP_CONCAT(DISTINCT pd.horario_id ORDER BY pd.horario_id) AS horario_ids,
+                MIN(pd.horario_id) AS horario_id,
                 d.nombre AS deporte,
                 pd.categoria,
                 h.dia,
                 h.hora_inicio,
                 h.hora_fin,
-                h.cupo_maximo,
+                MAX(h.cupo_maximo) AS cupo_maximo,
                 COALESCE(COUNT(DISTINCT CASE WHEN i.estado = 'activa' THEN ih.inscripcion_id END), 0) AS total_alumnos,
-                (SELECT COUNT(*) FROM asistencias ast WHERE ast.horario_id = pd.horario_id AND ast.fecha = ?) > 0 AS asistencia_hoy
+                MAX(CASE WHEN ast_hoy.cnt > 0 THEN 1 ELSE 0 END) AS asistencia_hoy
             FROM profesor_deportes pd
             JOIN horarios h ON h.horario_id = pd.horario_id
             JOIN deportes d ON d.deporte_id = pd.deporte_id
             LEFT JOIN inscripcion_horarios ih ON ih.horario_id = pd.horario_id
             LEFT JOIN inscripciones i ON i.inscripcion_id = ih.inscripcion_id
+            LEFT JOIN (
+                SELECT horario_id, COUNT(*) AS cnt FROM asistencias WHERE fecha = ?
+                GROUP BY horario_id
+            ) ast_hoy ON ast_hoy.horario_id = pd.horario_id
             WHERE pd.admin_id = ?
         `;
         const params = [fechaHoy, adminId];
@@ -3527,12 +3636,13 @@ app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => 
             params.push(dia);
         }
 
-        query += ' GROUP BY pd.horario_id, d.nombre, pd.categoria, h.dia, h.hora_inicio, h.hora_fin, h.cupo_maximo ORDER BY h.hora_inicio';
+        query += ' GROUP BY d.nombre, pd.categoria, h.dia, h.hora_inicio, h.hora_fin ORDER BY h.hora_inicio';
 
         const [rows] = await db.query(query, params);
 
         const clases = rows.map(r => ({
             horario_id: r.horario_id,
+            horario_ids: r.horario_ids,
             deporte: r.deporte,
             categoria: r.categoria || 'General',
             dia: r.dia,
@@ -3640,42 +3750,52 @@ app.get('/api/profesor/horarios-categoria', verificarAutenticacion, async (req, 
 });
 
 // GET /api/profesor/alumnos-clase/:horarioId
-// Devuelve los alumnos inscritos en un horario con su estado de asistencia de hoy
+// Devuelve los alumnos inscritos en un horario (o varios separados por coma) con su estado de asistencia de hoy
 app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async (req, res) => {
     try {
         const { horarioId } = req.params;
+        // Soportar múltiples horario_ids separados por coma (para clases con varios planes)
+        const horarioIds = horarioId.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
+        if (horarioIds.length === 0) {
+            return res.status(400).json({ success: false, error: 'horarioId inválido' });
+        }
         // Usar fecha enviada por el cliente (hora local Perú) si viene, sino UTC
         const fechaHoy = req.query.fecha || new Date().toISOString().split('T')[0];
 
-        // Datos del horario
+        // Datos del primer horario (para mostrar info de la clase)
         const [[horario]] = await db.query(`
             SELECT h.horario_id, d.nombre AS deporte, h.categoria, h.dia, h.hora_inicio, h.hora_fin
             FROM horarios h
             JOIN deportes d ON d.deporte_id = h.deporte_id
             WHERE h.horario_id = ?
-        `, [horarioId]);
+        `, [horarioIds[0]]);
 
         if (!horario) {
             return res.status(404).json({ success: false, error: 'Horario no encontrado' });
         }
 
-        // Alumnos inscritos + asistencia de hoy si existe
+        // Alumnos inscritos en TODOS los horarios relacionados + asistencia de hoy
+        const placeholders = horarioIds.map(() => '?').join(',');
         const [alumnos] = await db.query(`
             SELECT
                 a.alumno_id,
                 CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', a.apellido_materno) AS nombre_completo,
                 a.dni,
+                ih.horario_id AS alumno_horario_id,
                 CASE WHEN ast.asistencia_id IS NOT NULL THEN 1 ELSE 0 END AS asistencia_registrada,
                 COALESCE(ast.presente, 1) AS presente
             FROM inscripciones i
             JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
             JOIN alumnos a ON a.alumno_id = i.alumno_id
             LEFT JOIN asistencias ast ON ast.alumno_id = a.alumno_id
-                AND ast.horario_id = ? AND ast.fecha = ?
-            WHERE ih.horario_id = ?
+                AND ast.horario_id = ih.horario_id AND ast.fecha = ?
+            WHERE ih.horario_id IN (${placeholders})
               AND i.estado = 'activa'
             ORDER BY a.apellido_paterno, a.nombres
-        `, [horarioId, fechaHoy, horarioId]);
+        `, [fechaHoy, ...horarioIds]);
+
+        // Agregar horario_ids al objeto horario para que el frontend pueda usarlos al guardar
+        horario.horario_ids = horarioIds.join(',');
 
         res.json({ success: true, horario, alumnos });
     } catch (error) {
@@ -3695,13 +3815,14 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
             return res.status(400).json({ success: false, error: 'Datos incompletos' });
         }
 
-        // 1. Guardar asistencias
+        // 1. Guardar asistencias (usar horario_id específico del alumno si viene, sino el general)
         for (const a of asistencias) {
+            const hId = a.horario_id || horario_id;
             await db.query(`
                 INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, registrado_por)
                 VALUES (?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE presente = VALUES(presente), registrado_por = VALUES(registrado_por)
-            `, [a.alumno_id, horario_id, fecha, a.presente ? 1 : 0, adminId]);
+            `, [a.alumno_id, hId, fecha, a.presente ? 1 : 0, adminId]);
         }
 
         // 2. Recalcular puntos de asistencia del mes automáticamente
@@ -3755,20 +3876,26 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
 app.get('/api/profesor/historial-asistencias/:horarioId', verificarAutenticacion, async (req, res) => {
     try {
         const { horarioId } = req.params;
+        // Soportar múltiples horario_ids separados por coma
+        const horarioIds = horarioId.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
+        if (horarioIds.length === 0) {
+            return res.status(400).json({ success: false, error: 'horarioId inválido' });
+        }
         const limite = Math.min(parseInt(req.query.limite) || 20, 60);
 
+        const placeholders = horarioIds.map(() => '?').join(',');
         const [rows] = await db.query(`
             SELECT
                 ast.fecha,
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS presentes,
                 SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS ausentes,
-                COUNT(*) AS total
+                COUNT(DISTINCT CONCAT(ast.alumno_id, '-', ast.fecha)) AS total
             FROM asistencias ast
-            WHERE ast.horario_id = ?
+            WHERE ast.horario_id IN (${placeholders})
             GROUP BY ast.fecha
             ORDER BY ast.fecha DESC
             LIMIT ?
-        `, [horarioId, limite]);
+        `, [...horarioIds, limite]);
 
         const historial = rows.map(r => ({
             fecha: r.fecha instanceof Date ? r.fecha.toISOString().split('T')[0] : String(r.fecha).split('T')[0],
@@ -3786,6 +3913,7 @@ app.get('/api/profesor/historial-asistencias/:horarioId', verificarAutenticacion
 
 // GET /api/profesor/datos-exportar?horario_id=X&mes=3&anio=2026
 // Devuelve todos los alumnos con asistencia por fecha para exportar a Excel
+// horario_id puede ser uno solo o varios separados por coma (e.g. "10,15")
 app.get('/api/profesor/datos-exportar', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -3795,33 +3923,41 @@ app.get('/api/profesor/datos-exportar', verificarAutenticacion, async (req, res)
             return res.status(400).json({ success: false, error: 'Faltan parámetros: horario_id, mes, anio' });
         }
 
-        // Verificar que el horario pertenece al profesor
+        // Soportar múltiples horario_ids separados por coma
+        const horarioIds = horario_id.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
+        if (horarioIds.length === 0) {
+            return res.status(400).json({ success: false, error: 'horario_id inválido' });
+        }
+        const placeholders = horarioIds.map(() => '?').join(',');
+
+        // Verificar que al menos un horario pertenece al profesor
         const [[horario]] = await db.query(`
             SELECT h.horario_id, d.nombre AS deporte, h.categoria, h.dia, h.hora_inicio, h.hora_fin
             FROM horarios h
             JOIN deportes d ON d.deporte_id = h.deporte_id
             JOIN profesor_deportes pd ON pd.horario_id = h.horario_id AND pd.admin_id = ?
-            WHERE h.horario_id = ?
-        `, [adminId, horario_id]);
+            WHERE h.horario_id IN (${placeholders})
+            LIMIT 1
+        `, [adminId, ...horarioIds]);
 
         if (!horario) {
             return res.status(403).json({ success: false, error: 'Horario no autorizado' });
         }
 
-        // Obtener todas las fechas de clase de ese mes para ese horario
+        // Obtener todas las fechas de clase de ese mes para esos horarios
         const [fechasRows] = await db.query(`
             SELECT DISTINCT ast.fecha
             FROM asistencias ast
-            WHERE ast.horario_id = ?
+            WHERE ast.horario_id IN (${placeholders})
               AND MONTH(ast.fecha) = ? AND YEAR(ast.fecha) = ?
             ORDER BY ast.fecha ASC
-        `, [horario_id, mes, anio]);
+        `, [...horarioIds, mes, anio]);
 
         const fechas = fechasRows.map(r =>
             r.fecha instanceof Date ? r.fecha.toISOString().split('T')[0] : String(r.fecha).split('T')[0]
         );
 
-        // Obtener todos los alumnos inscritos en ese horario
+        // Obtener todos los alumnos inscritos en esos horarios
         const [alumnos] = await db.query(`
             SELECT DISTINCT
                 a.alumno_id,
@@ -3833,17 +3969,17 @@ app.get('/api/profesor/datos-exportar', verificarAutenticacion, async (req, res)
             FROM inscripciones i
             JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
             JOIN alumnos a ON a.alumno_id = i.alumno_id
-            WHERE ih.horario_id = ?
+            WHERE ih.horario_id IN (${placeholders})
             ORDER BY a.apellido_paterno, a.nombres
-        `, [horario_id]);
+        `, [...horarioIds]);
 
-        // Obtener todas las asistencias del mes para ese horario
+        // Obtener todas las asistencias del mes para esos horarios
         const [asistencias] = await db.query(`
             SELECT alumno_id, fecha, presente
             FROM asistencias
-            WHERE horario_id = ?
+            WHERE horario_id IN (${placeholders})
               AND MONTH(fecha) = ? AND YEAR(fecha) = ?
-        `, [horario_id, mes, anio]);
+        `, [...horarioIds, mes, anio]);
 
         // Construir mapa: alumno_id -> { fecha -> presente }
         const mapaAsistencias = {};
