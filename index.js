@@ -1974,7 +1974,7 @@ app.post('/api/pago-mensual', async (req, res) => {
     
     // Registrar en MySQL el pago mensual
     await db.query(
-      `INSERT INTO pagos_mensuales (alumno_id, mes, anio, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)
+      `INSERT INTO pagos_mensuales (alumno_id, mes, año, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)
        VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())
        ON DUPLICATE KEY UPDATE 
          comprobante_url = VALUES(comprobante_url),
@@ -8660,7 +8660,7 @@ asistencias: asistencia_id, alumno_id, horario_id, fecha, presente(0=ausente/1=p
 
 inscripcion_horarios: id, inscripcion_id, horario_id, estado(activo/inactivo)
 
-pagos_mensuales: pago_id, alumno_id, mes, anio, monto, estado(pendiente/confirmado/rechazado)
+pagos_mensuales: pago_id, alumno_id, mes, año, monto, estado(pendiente/confirmado/rechazado)
 
 categorias: categoria_id, deporte_id, nombre, ano_min, ano_max, estado(activo/inactivo)`;
 
