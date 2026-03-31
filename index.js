@@ -1936,6 +1936,28 @@ app.post('/api/pago-mensual', async (req, res) => {
     const alumnoDb = alumnos[0];
     const nombreCompleto = alumno || `${alumnoDb.nombres} ${alumnoDb.apellido_paterno} ${alumnoDb.apellido_materno}`;
     
+    // Extraer mes y año para verificar duplicado
+    const fechaCheck = new Date();
+    const mesCheck = mes ? mes.split(/[-\s]/)[0] : '';
+    const anioCheck = fechaCheck.getFullYear();
+    
+    // Verificar si ya existe un comprobante para este alumno/mes/año (evitar duplicados en Drive)
+    const [pagoExistente] = await db.query(
+      `SELECT pago_id, comprobante_url, estado FROM pagos_mensuales 
+       WHERE alumno_id = ? AND mes = ? AND año = ? AND comprobante_url IS NOT NULL AND comprobante_url != ''`,
+      [alumnoDb.alumno_id, mesCheck, anioCheck]
+    );
+    
+    if (pagoExistente.length > 0) {
+      console.log(`⚠️ Pago mensual duplicado detectado - DNI: ${dni}, Mes: ${mes}. Ya existe comprobante.`);
+      return res.json({
+        success: true,
+        message: 'Ya tienes un comprobante registrado para este mes. No es necesario enviarlo de nuevo.',
+        driveUrl: pagoExistente[0].comprobante_url,
+        duplicado: true
+      });
+    }
+    
     // Subir a Google Drive via Apps Script
     const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
