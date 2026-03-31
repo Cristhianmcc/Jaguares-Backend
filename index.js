@@ -58,6 +58,17 @@ async function initDatabase() {
     const connection = await db.getConnection();
     await connection.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
     console.log('✅ Conexión a MySQL establecida correctamente (utf8mb4)');
+    
+    // Obtener nombre real de la columna "año" para evitar problemas de encoding con ñ
+    try {
+      const [cols] = await connection.query('SHOW COLUMNS FROM pagos_mensuales');
+      const yearCol = cols.find(c => c.Type === 'int' && c.Field !== 'pago_id' && c.Field !== 'alumno_id' && c.Field !== 'monto');
+      if (yearCol) {
+        global.COL_ANIO = yearCol.Field;
+        console.log('✅ Columna año detectada como:', global.COL_ANIO);
+      }
+    } catch (e) { /* tabla puede no existir aún */ }
+    
     connection.release();
   } catch (error) {
     console.error('❌ Error al conectar con MySQL:', error);
@@ -1942,11 +1953,15 @@ app.post('/api/pago-mensual', async (req, res) => {
     const anioCheck = fechaCheck.getFullYear();
     
     // Verificar si ya existe un comprobante para este alumno/mes/año (evitar duplicados en Drive)
-    const [pagoExistente] = await db.query(
-      `SELECT pago_id, comprobante_url, estado FROM pagos_mensuales 
-       WHERE alumno_id = ? AND mes = ? AND año = ? AND comprobante_url IS NOT NULL AND comprobante_url != ''`,
-      [alumnoDb.alumno_id, mesCheck, anioCheck]
+    const [todosLosPagos] = await db.query(
+      'SELECT * FROM pagos_mensuales WHERE alumno_id = ? AND mes = ? AND comprobante_url IS NOT NULL',
+      [alumnoDb.alumno_id, mesCheck]
     );
+    // Filtrar por año en JS (evita problema de encoding con columna ñ)
+    const pagoExistente = todosLosPagos.filter(p => {
+      const yearVal = Object.values(p).find(v => typeof v === 'number' && v > 2000 && v < 2100);
+      return yearVal === anioCheck;
+    });
     
     if (pagoExistente.length > 0) {
       console.log(`⚠️ Pago mensual duplicado detectado - DNI: ${dni}, Mes: ${mes}. Ya existe comprobante.`);
@@ -1995,14 +2010,15 @@ app.post('/api/pago-mensual', async (req, res) => {
     const anioActual = fechaActual.getFullYear();
     
     // Registrar en MySQL el pago mensual
+    const colYear = global.COL_ANIO || 'anio';
     await db.query(
-      `INSERT INTO pagos_mensuales (alumno_id, mes, año, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())
-       ON DUPLICATE KEY UPDATE 
-         comprobante_url = VALUES(comprobante_url),
-         monto = VALUES(monto),
-         estado = 'pendiente',
-         fecha_pago = NOW()`,
+      'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)' +
+      " VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())" +
+      ' ON DUPLICATE KEY UPDATE' +
+      ' comprobante_url = VALUES(comprobante_url),' +
+      ' monto = VALUES(monto),' +
+      " estado = 'pendiente'," +
+      ' fecha_pago = NOW()',
       [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante]
     );
     console.log('✅ Pago mensual registrado en MySQL');
@@ -2022,6 +2038,113 @@ app.post('/api/pago-mensual', async (req, res) => {
       success: false, 
       error: error.message || 'Error al registrar pago mensual' 
     });
+  }
+});
+
+/**
+ * GET /api/admin/pagos-mensuales
+ * Listar pagos mensuales con filtros (para panel admin)
+ */
+app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { estado = 'todos', mes = '', anio = '', buscar = '' } = req.query;
+
+    let query = 
+      'SELECT ' +
+      'pm.*, ' +
+      'a.dni, ' +
+      'a.nombres, ' +
+      "CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos " +
+      'FROM pagos_mensuales pm ' +
+      'JOIN alumnos a ON pm.alumno_id = a.alumno_id ' +
+      'WHERE 1=1';
+    const params = [];
+
+    if (estado !== 'todos') {
+      query += ' AND pm.estado = ?';
+      params.push(estado);
+    }
+    if (mes) {
+      query += ' AND pm.mes = ?';
+      params.push(mes);
+    }
+    if (anio) {
+      // Se filtra por año en JS después de la consulta
+    }
+    if (buscar) {
+      query += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
+      const like = `%${buscar}%`;
+      params.push(like, like, like, like);
+    }
+
+    query += ' ORDER BY pm.created_at DESC LIMIT 500';
+
+    let [pagos] = await db.query(query, params);
+
+    // Filtrar por año en JS (evita problemas de encoding con la columna ñ)
+    if (anio) {
+      pagos = pagos.filter(p => {
+        const val = Object.values(p).find((v, i) => Object.keys(p)[i].length <= 4 && typeof v === 'number' && v > 2000 && v < 2100);
+        return val == anio;
+      });
+    }
+
+    res.json({ success: true, pagos });
+  } catch (error) {
+    console.error('❌ Error al listar pagos mensuales:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/pagos-mensuales/:id/confirmar
+ * Confirmar un pago mensual
+ */
+app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { observaciones } = req.body;
+
+    const [pago] = await db.query('SELECT pago_id, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    if (pago.length === 0) {
+      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    }
+
+    await db.query(
+      `UPDATE pagos_mensuales SET estado = 'confirmado', observaciones = COALESCE(?, observaciones) WHERE pago_id = ?`,
+      [observaciones || null, id]
+    );
+
+    res.json({ success: true, mensaje: 'Pago mensual confirmado' });
+  } catch (error) {
+    console.error('❌ Error al confirmar pago mensual:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/pagos-mensuales/:id/rechazar
+ * Rechazar un pago mensual
+ */
+app.put('/api/admin/pagos-mensuales/:id/rechazar', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { observaciones } = req.body;
+
+    const [pago] = await db.query('SELECT pago_id, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    if (pago.length === 0) {
+      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    }
+
+    await db.query(
+      `UPDATE pagos_mensuales SET estado = 'rechazado', observaciones = COALESCE(?, observaciones) WHERE pago_id = ?`,
+      [observaciones || 'Rechazado por administrador', id]
+    );
+
+    res.json({ success: true, mensaje: 'Pago mensual rechazado' });
+  } catch (error) {
+    console.error('❌ Error al rechazar pago mensual:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
