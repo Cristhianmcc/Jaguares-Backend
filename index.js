@@ -67,6 +67,12 @@ async function initDatabase() {
         global.COL_ANIO = yearCol.Field;
         console.log('✅ Columna año detectada como:', global.COL_ANIO);
       }
+      // Agregar columna observaciones si no existe
+      const tieneObs = cols.find(c => c.Field === 'observaciones');
+      if (!tieneObs) {
+        await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN observaciones TEXT NULL');
+        console.log('✅ Columna observaciones agregada a pagos_mensuales');
+      }
     } catch (e) { /* tabla puede no existir aún */ }
     
     connection.release();
@@ -2144,6 +2150,29 @@ app.put('/api/admin/pagos-mensuales/:id/rechazar', verificarAutenticacion, verif
     res.json({ success: true, mensaje: 'Pago mensual rechazado' });
   } catch (error) {
     console.error('❌ Error al rechazar pago mensual:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/pagos-mensuales/:id/observaciones
+ * Agregar o editar observaciones de un pago mensual
+ */
+app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { observaciones } = req.body;
+
+    const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    if (pago.length === 0) {
+      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    }
+
+    await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, id]);
+
+    res.json({ success: true, mensaje: 'Observación guardada' });
+  } catch (error) {
+    console.error('❌ Error al guardar observación:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
