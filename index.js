@@ -632,6 +632,60 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           );
         }
         
+        // ⚠️ VALIDAR CRUCES DE HORARIO con inscripciones activas existentes
+        // Traer todos los horarios activos del alumno
+        const [horariosActivos] = await conn.query(`
+          SELECT h.horario_id, h.dia, h.hora_inicio, h.hora_fin, d.nombre as deporte
+          FROM inscripcion_horarios ih
+          JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id
+          JOIN horarios h ON ih.horario_id = h.horario_id
+          JOIN deportes d ON i.deporte_id = d.deporte_id
+          WHERE i.alumno_id = ? AND i.estado = 'activa'
+        `, [alumnoId]);
+
+        console.log(`🔍 VALIDACIÓN DE CRUCES: alumnoId=${alumnoId}, horarios activos encontrados: ${horariosActivos.length}`);
+        if (horariosActivos.length > 0) {
+          console.log('📋 Horarios activos:', horariosActivos.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
+        }
+
+        // Traer detalle de los horarios nuevos solicitados
+        const idsNuevos = horarios.map(h => h.horario_id).filter(Boolean);
+        console.log(`📋 IDs nuevos a inscribir: [${idsNuevos.join(', ')}]`);
+        
+        if (idsNuevos.length > 0 && horariosActivos.length > 0) {
+          const [horariosNuevosDetalle] = await conn.query(`
+            SELECT h.horario_id, h.dia, h.hora_inicio, h.hora_fin, d.nombre as deporte
+            FROM horarios h
+            JOIN deportes d ON h.deporte_id = d.deporte_id
+            WHERE h.horario_id IN (${idsNuevos.map(() => '?').join(',')})
+          `, idsNuevos);
+
+          console.log('📋 Horarios nuevos detalle:', horariosNuevosDetalle.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
+
+          for (const nuevo of horariosNuevosDetalle) {
+            for (const existente of horariosActivos) {
+              if (nuevo.dia.toUpperCase().trim() === existente.dia.toUpperCase().trim()) {
+                // Normalizar horas a string "HH:MM:SS" para comparación segura
+                const nInicio = String(nuevo.hora_inicio).padStart(8, '0');
+                const nFin = String(nuevo.hora_fin).padStart(8, '0');
+                const eInicio = String(existente.hora_inicio).padStart(8, '0');
+                const eFin = String(existente.hora_fin).padStart(8, '0');
+                console.log(`🔍 Comparando: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} vs ${existente.deporte} ${existente.dia} ${eInicio}-${eFin} → cruza=${nInicio < eFin && nFin > eInicio}`);
+                if (nInicio < eFin && nFin > eInicio) {
+                  console.warn(`❌ CRUCE DE HORARIO DETECTADO: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} se cruza con ${existente.deporte} ${existente.dia} ${eInicio}-${eFin}`);
+                  await conn.rollback();
+                  conn.release();
+                  return res.status(409).json({
+                    success: false,
+                    error: 'Conflicto de horario',
+                    message: `Ya tienes ${existente.deporte} el ${existente.dia} de ${String(existente.hora_inicio).substring(0,5)} a ${String(existente.hora_fin).substring(0,5)}. No puedes inscribirte en ${nuevo.deporte} (${String(nuevo.hora_inicio).substring(0,5)}-${String(nuevo.hora_fin).substring(0,5)}) porque se cruzan los horarios.`
+                  });
+                }
+              }
+            }
+          }
+        }
+
         const inscripcionesIds = [];
         for (const [nombreDeporte, info] of Object.entries(deportesMap)) {
           // ⚠️ IMPORTANTE: Usar coincidencia EXACTA (=) en vez de LIKE.
@@ -1052,6 +1106,22 @@ app.post('/api/eliminar-horario', async (req, res) => {
     const nuevoPrecio = calcularPrecio(totalDias, plan, deporte);
     await db.query('UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?', [nuevoPrecio, inscripcion_id]);
 
+    // 4b. Actualizar monto en pagos_mensuales pendientes del mes actual
+    try {
+      const ahora = new Date();
+      const mesActual = ahora.toLocaleString('es-PE', { month: 'long' }).split(' ')[0];
+      const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+      if (alumnoRows.length > 0) {
+        const [updated] = await db.query(
+          "UPDATE pagos_mensuales SET monto = ? WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'",
+          [nuevoPrecio, alumnoRows[0].alumno_id, mesActual]
+        );
+        if (updated.affectedRows > 0) {
+          console.log(`💰 pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
+        }
+      }
+    } catch (e) { console.error('⚠️ Error al actualizar pagos_mensuales:', e.message); }
+
     // 5. Limpiar caché
     cache.del(getCacheKey('consultas', dni));
     console.log(`🗑️ Horario ${horario_id} eliminado de inscripción ${inscripcion_id}. Días restantes: ${totalDias}. Precio: S/.${nuevoPrecio}`);
@@ -1203,6 +1273,22 @@ app.post('/api/agregar-horario', async (req, res) => {
     `, [nuevoPrecio, inscripcion_id]);
 
     console.log(`💰 precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} días, plan ${plan})`);
+
+    // 5b. Actualizar monto en pagos_mensuales pendientes del mes actual
+    try {
+      const ahora = new Date();
+      const mesActual = ahora.toLocaleString('es-PE', { month: 'long' }).split(' ')[0];
+      const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+      if (alumnoRows.length > 0) {
+        const [updated] = await db.query(
+          "UPDATE pagos_mensuales SET monto = ? WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'",
+          [nuevoPrecio, alumnoRows[0].alumno_id, mesActual]
+        );
+        if (updated.affectedRows > 0) {
+          console.log(`💰 pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
+        }
+      }
+    } catch (e) { console.error('⚠️ Error al actualizar pagos_mensuales:', e.message); }
 
     // 6. Limpiar caché del DNI
     const cacheKeyConsulta = getCacheKey('consultas', dni);
@@ -1446,7 +1532,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           });
         }
         
-        // Obtener inscripciones activas y suspendidas (no canceladas)
+        // Obtener inscripciones activas, suspendidas y pendientes (no canceladas)
         const [inscripciones] = await db.query(`
           SELECT 
             i.inscripcion_id,
@@ -1458,7 +1544,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             i.fecha_inscripcion as fecha_registro
           FROM inscripciones i
           JOIN deportes d ON i.deporte_id = d.deporte_id
-          WHERE i.alumno_id = ? AND i.estado IN ('activa', 'suspendida')
+          WHERE i.alumno_id = ? AND i.estado IN ('activa', 'suspendida', 'pendiente')
         `, [alumno.alumno_id]);
         
         // Obtener horarios de cada inscripción
@@ -2178,6 +2264,33 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
 });
 
 /**
+ * PUT /api/admin/pagos-mensuales/:id/monto
+ * Editar manualmente el monto de un pago mensual
+ */
+app.put('/api/admin/pagos-mensuales/:id/monto', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { monto } = req.body;
+
+    if (monto === undefined || monto === null || isNaN(parseFloat(monto)) || parseFloat(monto) < 0) {
+      return res.status(400).json({ success: false, error: 'Monto inválido' });
+    }
+
+    const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    if (pago.length === 0) {
+      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    }
+
+    await db.query('UPDATE pagos_mensuales SET monto = ? WHERE pago_id = ?', [parseFloat(monto), id]);
+
+    res.json({ success: true, mensaje: 'Monto actualizado' });
+  } catch (error) {
+    console.error('❌ Error al actualizar monto:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * POST /api/alumno/toggle-deporte
  * Pausar o reactivar un deporte inscrito
  */
@@ -2268,6 +2381,68 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
       success: false,
       error: error.message || 'Error al cambiar estado del deporte'
     });
+  }
+});
+
+/**
+ * POST /api/alumno/cancelar-deporte
+ * Cancelar (dejar) un deporte inscrito — elimina la inscripción y libera los horarios
+ */
+app.post('/api/alumno/cancelar-deporte', async (req, res) => {
+  try {
+    const { dni, inscripcion_id } = req.body;
+
+    if (!dni || !inscripcion_id) {
+      return res.status(400).json({ success: false, error: 'Datos incompletos. Se requiere: dni e inscripcion_id' });
+    }
+    if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+
+    // Verificar alumno
+    const [alumnos] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+    if (alumnos.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+    const alumnoId = alumnos[0].alumno_id;
+
+    // Verificar inscripción pertenece al alumno y está activa o suspendida
+    const [inscRows] = await db.query(`
+      SELECT i.inscripcion_id, i.estado, d.nombre as deporte
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE i.inscripcion_id = ? AND i.alumno_id = ? AND i.estado IN ('activa', 'suspendida')
+    `, [inscripcion_id, alumnoId]);
+
+    if (inscRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada o no se puede cancelar' });
+    }
+
+    const deporte = inscRows[0].deporte;
+
+    // Contar cuántos horarios se liberan
+    const [horarios] = await db.query('SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcion_id]);
+    const diasLiberados = horarios[0].total;
+
+    // Eliminar horarios asignados
+    await db.query('DELETE FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcion_id]);
+
+    // Cambiar estado a cancelada
+    await db.query("UPDATE inscripciones SET estado = 'cancelada' WHERE inscripcion_id = ?", [inscripcion_id]);
+
+    // Invalidar caché
+    invalidateDNICache(dni);
+
+    console.log(`🗑️ Inscripción ${inscripcion_id} (${deporte}) cancelada para DNI ${dni}. ${diasLiberados} horarios liberados.`);
+
+    res.json({
+      success: true,
+      message: `Has dejado ${deporte} correctamente`,
+      deporte,
+      dias_liberados: diasLiberados
+    });
+
+  } catch (error) {
+    console.error('❌ Error al cancelar deporte:', error);
+    res.status(500).json({ success: false, error: error.message || 'Error al cancelar el deporte' });
   }
 });
 
@@ -8139,7 +8314,7 @@ app.get('/api/admin/inscripciones', async (req, res) => {
         COUNT(i.inscripcion_id) as total_inscripciones,
         GROUP_CONCAT(DISTINCT d.nombre SEPARATOR ', ') as deportes_inscritos
       FROM alumnos a
-      LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id AND i.estado = 'activa'
+      LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id AND i.estado IN ('activa', 'pendiente')
       LEFT JOIN deportes d ON i.deporte_id = d.deporte_id
       WHERE 1=1
     `;
@@ -8455,6 +8630,105 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     });
   } catch (error) {
     console.error('Error al confirmar pago:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/inscripciones/activar/:inscripcionId
+ * Activar una inscripción específica (por deporte)
+ */
+app.put('/api/admin/inscripciones/activar/:inscripcionId', async (req, res) => {
+  try {
+    const { inscripcionId } = req.params;
+    
+    const [inscripciones] = await db.query(
+      `SELECT i.inscripcion_id, i.estado, i.alumno_id, d.nombre as deporte
+       FROM inscripciones i
+       JOIN deportes d ON i.deporte_id = d.deporte_id
+       WHERE i.inscripcion_id = ?`,
+      [inscripcionId]
+    );
+    
+    if (inscripciones.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+    }
+    
+    const inscripcion = inscripciones[0];
+    
+    if (inscripcion.estado === 'activa') {
+      return res.status(400).json({ success: false, error: 'La inscripción ya está activa' });
+    }
+    
+    await db.query(
+      `UPDATE inscripciones SET estado = 'activa', updated_at = NOW() WHERE inscripcion_id = ?`,
+      [inscripcionId]
+    );
+    
+    // Invalidar caché del alumno
+    const [alumnoRows] = await db.query('SELECT dni FROM alumnos WHERE alumno_id = ?', [inscripcion.alumno_id]);
+    if (alumnoRows.length > 0) {
+      invalidateDNICache(alumnoRows[0].dni);
+    }
+    
+    console.log(`✅ Inscripción ${inscripcionId} (${inscripcion.deporte}) activada manualmente`);
+    
+    res.json({
+      success: true,
+      mensaje: `Inscripción de ${inscripcion.deporte} activada exitosamente`,
+      deporte: inscripcion.deporte
+    });
+  } catch (error) {
+    console.error('Error al activar inscripción:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/inscripciones/pendiente/:inscripcionId
+ * Marcar una inscripción específica como pendiente (por deporte)
+ */
+app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) => {
+  try {
+    const { inscripcionId } = req.params;
+    
+    const [inscripciones] = await db.query(
+      `SELECT i.inscripcion_id, i.estado, i.alumno_id, d.nombre as deporte
+       FROM inscripciones i
+       JOIN deportes d ON i.deporte_id = d.deporte_id
+       WHERE i.inscripcion_id = ?`,
+      [inscripcionId]
+    );
+    
+    if (inscripciones.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+    }
+    
+    const inscripcion = inscripciones[0];
+    
+    if (inscripcion.estado === 'pendiente') {
+      return res.status(400).json({ success: false, error: 'La inscripción ya está pendiente' });
+    }
+    
+    await db.query(
+      `UPDATE inscripciones SET estado = 'pendiente', updated_at = NOW() WHERE inscripcion_id = ?`,
+      [inscripcionId]
+    );
+    
+    const [alumnoRows] = await db.query('SELECT dni FROM alumnos WHERE alumno_id = ?', [inscripcion.alumno_id]);
+    if (alumnoRows.length > 0) {
+      invalidateDNICache(alumnoRows[0].dni);
+    }
+    
+    console.log(`⏳ Inscripción ${inscripcionId} (${inscripcion.deporte}) marcada como pendiente`);
+    
+    res.json({
+      success: true,
+      mensaje: `${inscripcion.deporte} marcado como pendiente`,
+      deporte: inscripcion.deporte
+    });
+  } catch (error) {
+    console.error('Error al marcar pendiente:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
