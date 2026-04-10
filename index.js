@@ -73,6 +73,19 @@ async function initDatabase() {
         await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN observaciones TEXT NULL');
         console.log('✅ Columna observaciones agregada a pagos_mensuales');
       }
+      // Migrar unique key para permitir pagos parciales (split por deporte)
+      try {
+        const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
+        if (indexes.length > 0) {
+          const colAnio = global.COL_ANIO || 'anio';
+          // Primero crear índice alternativo para la FK (MySQL lo necesita)
+          await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_id (alumno_id)');
+          // Ahora sí podemos eliminar el unique
+          await connection.query('ALTER TABLE pagos_mensuales DROP INDEX unique_alumno_mes');
+          await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_mes (alumno_id, mes, `' + colAnio + '`)');
+          console.log('✅ Migrado unique_alumno_mes → idx_alumno_mes (permite pagos parciales)');
+        }
+      } catch (migErr) { console.warn('⚠️ Migración unique key:', migErr.message); }
     } catch (e) { /* tabla puede no existir aún */ }
     
     connection.release();
@@ -1474,11 +1487,16 @@ app.get('/api/consultar/:dni', async (req, res) => {
     // Crear clave de caché para este DNI
     const cacheKey = getCacheKey('consultas', dni);
     
-    // Intentar obtener del caché
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
-      return res.json(cachedData);
+    // Consultas admin con incluir_inactivos saltan el caché
+    const incluirInactivos = req.query.incluir_inactivos === '1';
+    
+    // Intentar obtener del caché (solo para consultas públicas)
+    if (!incluirInactivos) {
+      const cachedData = cache.get(cacheKey);
+      if (cachedData) {
+        console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
+        return res.json(cachedData);
+      }
     }
     
     console.log(`🌐 CACHÉ MISS: ${cacheKey}`);
@@ -1523,8 +1541,8 @@ app.get('/api/consultar/:dni', async (req, res) => {
         
         const alumno = alumnoRows[0];
         
-        // Validar que el usuario esté activo
-        if (alumno.estado === 'inactivo') {
+        // Validar que el usuario esté activo (a menos que sea consulta admin)
+        if (alumno.estado === 'inactivo' && !incluirInactivos) {
           return res.status(403).json({
             success: false,
             inactivo: true,
@@ -1532,7 +1550,10 @@ app.get('/api/consultar/:dni', async (req, res) => {
           });
         }
         
-        // Obtener inscripciones activas, suspendidas y pendientes (no canceladas)
+        // Obtener inscripciones (si es admin, incluir canceladas también)
+        const estadosInscripcion = incluirInactivos 
+          ? `('activa', 'suspendida', 'pendiente', 'cancelada')` 
+          : `('activa', 'suspendida', 'pendiente')`;
         const [inscripciones] = await db.query(`
           SELECT 
             i.inscripcion_id,
@@ -1544,7 +1565,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             i.fecha_inscripcion as fecha_registro
           FROM inscripciones i
           JOIN deportes d ON i.deporte_id = d.deporte_id
-          WHERE i.alumno_id = ? AND i.estado IN ('activa', 'suspendida', 'pendiente')
+          WHERE i.alumno_id = ? AND i.estado IN ${estadosInscripcion}
         `, [alumno.alumno_id]);
         
         // Obtener horarios de cada inscripción
@@ -1608,6 +1629,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             dni: alumno.dni,
             nombres: alumno.nombres,
             apellidos: alumno.apellidos,
+            estado: alumno.estado,
             fecha_nacimiento: alumno.fecha_nacimiento,
             edad: alumno.edad,
             sexo: alumno.sexo,
@@ -1672,9 +1694,11 @@ app.get('/api/consultar/:dni', async (req, res) => {
           }
         }
 
-        // Cachear resultado
-        cache.set(cacheKey, resultado, CACHE_TTL.consultas);
-        console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
+        // Cachear resultado (solo consultas públicas, no admin con canceladas)
+        if (!incluirInactivos) {
+          cache.set(cacheKey, resultado, CACHE_TTL.consultas);
+          console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
+        }
         console.log(`✅ Consulta desde MySQL - Estado pago: ${alumno.estado_pago}`);
         
         return res.json(resultado);
@@ -2103,16 +2127,25 @@ app.post('/api/pago-mensual', async (req, res) => {
     
     // Registrar en MySQL el pago mensual
     const colYear = global.COL_ANIO || 'anio';
-    await db.query(
-      'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)' +
-      " VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())" +
-      ' ON DUPLICATE KEY UPDATE' +
-      ' comprobante_url = VALUES(comprobante_url),' +
-      ' monto = VALUES(monto),' +
-      " estado = 'pendiente'," +
-      ' fecha_pago = NOW()',
-      [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante]
+    // Buscar si ya existe un pago pendiente para este alumno/mes/año
+    const [existePago] = await db.query(
+      'SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND mes = ? AND `' + colYear + '` = ? AND estado = "pendiente" LIMIT 1',
+      [alumnoDb.alumno_id, mesNombre, anioActual]
     );
+    if (existePago.length > 0) {
+      // Actualizar el pago pendiente existente
+      await db.query(
+        'UPDATE pagos_mensuales SET comprobante_url = ?, monto = ?, fecha_pago = NOW() WHERE pago_id = ?',
+        [urlComprobante, monto || 0, existePago[0].pago_id]
+      );
+    } else {
+      // Crear nuevo pago pendiente
+      await db.query(
+        'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)' +
+        " VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())",
+        [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante]
+      );
+    }
     console.log('✅ Pago mensual registrado en MySQL');
     
     // Invalidar caché
@@ -2139,7 +2172,7 @@ app.post('/api/pago-mensual', async (req, res) => {
  */
 app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
-    const { estado = 'todos', mes = '', anio = '', buscar = '' } = req.query;
+    const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '' } = req.query;
 
     let query = 
       'SELECT ' +
@@ -2148,8 +2181,15 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       'a.nombres, ' +
       "CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos " +
       'FROM pagos_mensuales pm ' +
-      'JOIN alumnos a ON pm.alumno_id = a.alumno_id ' +
-      'WHERE 1=1';
+      'JOIN alumnos a ON pm.alumno_id = a.alumno_id ';
+    
+    // Si hay filtro de deporte, hacer JOIN con inscripciones y deportes
+    if (deporte) {
+      query += 'JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN (\'activa\',\'pendiente\') ' +
+               'JOIN deportes d ON i.deporte_id = d.deporte_id ';
+    }
+    
+    query += 'WHERE 1=1';
     const params = [];
 
     if (estado !== 'todos') {
@@ -2163,10 +2203,19 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     if (anio) {
       // Se filtra por año en JS después de la consulta
     }
+    if (deporte) {
+      query += ' AND UPPER(d.nombre) = UPPER(?)';
+      params.push(deporte);
+    }
     if (buscar) {
       query += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
       const like = `%${buscar}%`;
       params.push(like, like, like, like);
+    }
+
+    // GROUP BY para evitar duplicados cuando un alumno tiene múltiples inscripciones en el mismo deporte
+    if (deporte) {
+      query += ' GROUP BY pm.pago_id';
     }
 
     query += ' ORDER BY pm.created_at DESC LIMIT 500';
@@ -2180,6 +2229,31 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         return val == anio;
       });
     }
+
+    // Agregar deportes inscritos con precios a cada pago
+    const alumnoIds = [...new Set(pagos.map(p => p.alumno_id))];
+    let deportesPorAlumno = {};
+    if (alumnoIds.length > 0) {
+      const phAlumnos = alumnoIds.map(() => '?').join(',');
+      const [inscDeportes] = await db.query(`
+        SELECT i.alumno_id, d.nombre as deporte, i.precio_mensual, i.estado as estado_inscripcion
+        FROM inscripciones i
+        JOIN deportes d ON i.deporte_id = d.deporte_id
+        WHERE i.alumno_id IN (${phAlumnos}) AND i.estado IN ('activa','pendiente')
+        ORDER BY d.nombre
+      `, alumnoIds);
+      inscDeportes.forEach(row => {
+        if (!deportesPorAlumno[row.alumno_id]) deportesPorAlumno[row.alumno_id] = [];
+        deportesPorAlumno[row.alumno_id].push({
+          deporte: row.deporte,
+          precio: parseFloat(row.precio_mensual || 0),
+          estado: row.estado_inscripcion
+        });
+      });
+    }
+    pagos.forEach(p => {
+      p.deportes_inscritos = deportesPorAlumno[p.alumno_id] || [];
+    });
 
     res.json({ success: true, pagos });
   } catch (error) {
@@ -2195,17 +2269,43 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { observaciones } = req.body;
+    const { observaciones, monto, deportes_pendientes } = req.body;
 
-    const [pago] = await db.query('SELECT pago_id, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    const [pago] = await db.query('SELECT pago_id, alumno_id, mes, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
     if (pago.length === 0) {
       return res.status(404).json({ success: false, error: 'Pago no encontrado' });
     }
 
-    await db.query(
-      `UPDATE pagos_mensuales SET estado = 'confirmado', observaciones = COALESCE(?, observaciones) WHERE pago_id = ?`,
-      [observaciones || null, id]
-    );
+    let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', observaciones = COALESCE(?, observaciones)`;
+    const updateParams = [observaciones || null];
+    
+    // Si se envía un monto ajustado, actualizar también
+    if (monto !== undefined && monto !== null) {
+      updateQuery += `, monto = ?`;
+      updateParams.push(parseFloat(monto));
+    }
+    
+    updateQuery += ` WHERE pago_id = ?`;
+    updateParams.push(id);
+
+    await db.query(updateQuery, updateParams);
+
+    // Si hay deportes pendientes, crear pago pendiente separado para ellos
+    if (deportes_pendientes && deportes_pendientes.length > 0) {
+      const montoPendiente = deportes_pendientes.reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
+      const nombresPendientes = deportes_pendientes.map(d => d.deporte).join(', ');
+      const colYear = global.COL_ANIO || 'anio';
+      // Obtener el año del pago original
+      const [pagoOriginal] = await db.query('SELECT `' + colYear + '` as anio_val FROM pagos_mensuales WHERE pago_id = ?', [id]);
+      const anioVal = pagoOriginal[0]?.anio_val || new Date().getFullYear();
+      
+      await db.query(
+        'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, estado, observaciones, metodo_pago, created_at)' +
+        " VALUES (?, ?, ?, ?, 'pendiente', ?, 'Pendiente de pago', NOW())",
+        [pago[0].alumno_id, pago[0].mes, anioVal, montoPendiente, `Pendiente: ${nombresPendientes}`]
+      );
+      console.log(`🟡 Pago pendiente creado para ${nombresPendientes} (S/ ${montoPendiente.toFixed(2)})`);
+    }
 
     res.json({ success: true, mensaje: 'Pago mensual confirmado' });
   } catch (error) {
@@ -2725,8 +2825,8 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
         }
         
         if (deporte) {
-          query += ` AND d.nombre LIKE ?`;
-          params.push(`%${deporte}%`);
+          query += ` AND UPPER(d.nombre) = UPPER(?)`;
+          params.push(deporte);
         }
         
         query += ` GROUP BY i.inscripcion_id, a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno, a.fecha_nacimiento, a.sexo, a.telefono, a.email, a.direccion, a.apoderado, a.telefono_apoderado, a.seguro_tipo, a.condicion_medica, a.estado, a.estado_pago, a.monto_pago, a.numero_operacion, a.fecha_pago, a.dni_frontal_url, a.dni_reverso_url, a.foto_carnet_url, a.comprobante_pago_url, a.created_at, d.nombre, i.estado`;
@@ -3113,6 +3213,132 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
 });
 
 // ==================== FIN ENDPOINTS ADMINISTRACIÓN ====================
+
+// Endpoint: Obtener inscripciones activas de un alumno por DNI (para modal de desactivación selectiva)
+app.get('/api/admin/inscripciones-alumno/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { dni } = req.params;
+    if (!dni || dni.length < 8) {
+      return res.status(400).json({ success: false, error: 'DNI inválido' });
+    }
+
+    const [alumnoRows] = await db.query('SELECT alumno_id, nombres, apellido_paterno, apellido_materno, estado FROM alumnos WHERE dni = ?', [dni]);
+    if (alumnoRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+
+    const alumno = alumnoRows[0];
+    const nombreCompleto = `${alumno.nombres} ${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim();
+
+    const [inscripciones] = await db.query(`
+      SELECT i.inscripcion_id, d.nombre as deporte, i.plan, i.precio_mensual, i.estado,
+             GROUP_CONCAT(DISTINCT CONCAT(h.dia, ' ', TIME_FORMAT(h.hora_inicio, '%H:%i'), '-', TIME_FORMAT(h.hora_fin, '%H:%i')) ORDER BY FIELD(h.dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO') SEPARATOR ', ') as horarios
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      LEFT JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
+      LEFT JOIN horarios h ON ih.horario_id = h.horario_id
+      WHERE i.alumno_id = ? AND i.estado IN ('activa', 'pendiente')
+      GROUP BY i.inscripcion_id
+    `, [alumno.alumno_id]);
+
+    res.json({ success: true, nombre: nombreCompleto, estado_alumno: alumno.estado, inscripciones });
+  } catch (error) {
+    console.error('Error al obtener inscripciones del alumno:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint: Desactivar inscripciones selectivas (por inscripcion_id)
+app.post('/api/admin/desactivar-inscripciones', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { dni, inscripcion_ids } = req.body;
+
+    if (!dni || !inscripcion_ids || !Array.isArray(inscripcion_ids) || inscripcion_ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'DNI e inscripciones requeridos' });
+    }
+
+    const idsValidos = inscripcion_ids.filter(id => Number.isInteger(Number(id))).map(Number);
+    if (idsValidos.length === 0) {
+      return res.status(400).json({ success: false, error: 'IDs de inscripción inválidos' });
+    }
+
+    const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+    if (alumnoRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+    const alumnoId = alumnoRows[0].alumno_id;
+
+    const placeholders = idsValidos.map(() => '?').join(',');
+    await db.query(
+      `UPDATE inscripciones SET estado = 'cancelada' WHERE inscripcion_id IN (${placeholders}) AND alumno_id = ?`,
+      [...idsValidos, alumnoId]
+    );
+
+    const [restantes] = await db.query(
+      `SELECT COUNT(*) as total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+      [alumnoId]
+    );
+
+    if (restantes[0].total === 0) {
+      await db.query(`UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?`, [alumnoId]);
+      console.log(`🔴 Alumno ${dni} marcado como inactivo (sin inscripciones activas)`);
+    }
+
+    invalidateDNICache(dni);
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(inscritosKeys);
+
+    console.log(`✅ Desactivadas ${idsValidos.length} inscripciones de ${dni}`);
+    res.json({ success: true, message: `Se desactivaron ${idsValidos.length} inscripción(es)`, alumno_inactivo: restantes[0].total === 0 });
+  } catch (error) {
+    console.error('Error al desactivar inscripciones:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint: Reactivar inscripciones selectivas (por inscripcion_id)
+app.post('/api/admin/reactivar-inscripciones', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { dni, inscripcion_ids } = req.body;
+
+    if (!dni || !inscripcion_ids || !Array.isArray(inscripcion_ids) || inscripcion_ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'DNI e inscripciones requeridos' });
+    }
+
+    const idsValidos = inscripcion_ids.filter(id => Number.isInteger(Number(id))).map(Number);
+    if (idsValidos.length === 0) {
+      return res.status(400).json({ success: false, error: 'IDs de inscripción inválidos' });
+    }
+
+    const [alumnoRows] = await db.query('SELECT alumno_id, estado FROM alumnos WHERE dni = ?', [dni]);
+    if (alumnoRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+    const alumnoId = alumnoRows[0].alumno_id;
+
+    const placeholders = idsValidos.map(() => '?').join(',');
+    await db.query(
+      `UPDATE inscripciones SET estado = 'activa' WHERE inscripcion_id IN (${placeholders}) AND alumno_id = ? AND estado = 'cancelada'`,
+      [...idsValidos, alumnoId]
+    );
+
+    // Si el alumno estaba inactivo, reactivarlo
+    if (alumnoRows[0].estado === 'inactivo') {
+      await db.query(`UPDATE alumnos SET estado = 'activo' WHERE alumno_id = ?`, [alumnoId]);
+      console.log(`🟢 Alumno ${dni} reactivado automáticamente`);
+    }
+
+    invalidateDNICache(dni);
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(inscritosKeys);
+
+    console.log(`✅ Reactivadas ${idsValidos.length} inscripciones de ${dni}`);
+    res.json({ success: true, message: `Se reactivaron ${idsValidos.length} inscripción(es)` });
+  } catch (error) {
+    console.error('Error al reactivar inscripciones:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Endpoint: Desactivar usuario (soft delete - marca como inactivo)
 app.post('/api/desactivar-usuario', async (req, res) => {
