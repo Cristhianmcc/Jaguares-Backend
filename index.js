@@ -2173,6 +2173,12 @@ app.post('/api/pago-mensual', async (req, res) => {
 app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '' } = req.query;
+    const colYear = global.COL_ANIO || 'anio';
+    const ahora = new Date();
+    const mesActual = ahora.toLocaleString('es-PE', { month: 'long' });
+    const anioActual = ahora.getFullYear();
+    const filtroMes = mes || mesActual;
+    const filtroAnio = anio ? parseInt(anio, 10) : anioActual;
 
     let query = 
       'SELECT ' +
@@ -2223,6 +2229,74 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     query += ' ORDER BY pm.created_at DESC LIMIT 500';
 
     let [pagos] = await db.query(query, params);
+
+    if (estado === 'pendiente') {
+      const pendienteParams = [filtroMes, filtroAnio];
+      let pendientesQuery = `
+        SELECT a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
+               a.telefono, a.telefono_apoderado
+        FROM alumnos a
+        JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')
+        LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.${colYear} = ?`
+      ;
+      if (deporte) {
+        pendientesQuery += ' JOIN deportes d ON i.deporte_id = d.deporte_id';
+      }
+      pendientesQuery += ' WHERE pm.pago_id IS NULL';
+      if (deporte) {
+        pendientesQuery += ' AND UPPER(d.nombre) = UPPER(?)';
+        pendienteParams.push(deporte);
+      }
+      if (buscar) {
+        pendientesQuery += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
+        const like = `%${buscar}%`;
+        pendienteParams.push(like, like, like, like);
+      }
+      pendientesQuery += ' GROUP BY a.alumno_id';
+
+      const [sinPago] = await db.query(pendientesQuery, pendienteParams);
+      if (sinPago.length > 0) {
+        const alumnoIds = sinPago.map(row => row.alumno_id);
+        const placeholders = alumnoIds.map(() => '?').join(',');
+        const montoParams = [...alumnoIds];
+        let montoQuery = `
+          SELECT i.alumno_id, SUM(i.precio_mensual) AS monto
+          FROM inscripciones i
+          JOIN deportes d ON i.deporte_id = d.deporte_id
+          WHERE i.alumno_id IN (${placeholders}) AND i.estado IN ('activa','pendiente')`
+        ;
+        if (deporte) {
+          montoQuery += ' AND UPPER(d.nombre) = UPPER(?)';
+          montoParams.push(deporte);
+        }
+        montoQuery += ' GROUP BY i.alumno_id';
+
+        const [montos] = await db.query(montoQuery, montoParams);
+        const montoMap = {};
+        montos.forEach(row => { montoMap[row.alumno_id] = parseFloat(row.monto || 0); });
+
+        const faltantes = sinPago.map(row => ({
+          pago_id: -row.alumno_id,
+          alumno_id: row.alumno_id,
+          dni: row.dni,
+          nombres: row.nombres,
+          apellidos: `${row.apellido_paterno} ${row.apellido_materno}`,
+          telefono: row.telefono,
+          telefono_apoderado: row.telefono_apoderado,
+          mes: filtroMes,
+          [colYear]: filtroAnio,
+          año: filtroAnio,
+          monto: montoMap[row.alumno_id] || 0,
+          estado: 'pendiente',
+          comprobante_url: null,
+          fecha_pago: null,
+          created_at: null,
+          es_sin_pago: true
+        }));
+
+        pagos = pagos.concat(faltantes);
+      }
+    }
 
     // Filtrar por año en JS (evita problemas de encoding con la columna ñ)
     if (anio) {
