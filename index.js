@@ -2179,6 +2179,8 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       'pm.*, ' +
       'a.dni, ' +
       'a.nombres, ' +
+      'a.telefono, ' +
+      'a.telefono_apoderado, ' +
       "CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos " +
       'FROM pagos_mensuales pm ' +
       'JOIN alumnos a ON pm.alumno_id = a.alumno_id ';
@@ -2232,27 +2234,66 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 
     // Agregar deportes inscritos con precios a cada pago
     const alumnoIds = [...new Set(pagos.map(p => p.alumno_id))];
+    const phAlumnos = alumnoIds.map(() => '?').join(',');
     let deportesPorAlumno = {};
     if (alumnoIds.length > 0) {
-      const phAlumnos = alumnoIds.map(() => '?').join(',');
       const [inscDeportes] = await db.query(`
-        SELECT i.alumno_id, d.nombre as deporte, i.precio_mensual, i.estado as estado_inscripcion
+        SELECT i.inscripcion_id, i.alumno_id, d.nombre as deporte, i.precio_mensual, i.estado as estado_inscripcion
         FROM inscripciones i
         JOIN deportes d ON i.deporte_id = d.deporte_id
-        WHERE i.alumno_id IN (${phAlumnos}) AND i.estado IN ('activa','pendiente')
+        WHERE i.alumno_id IN (${phAlumnos})
         ORDER BY d.nombre
       `, alumnoIds);
       inscDeportes.forEach(row => {
         if (!deportesPorAlumno[row.alumno_id]) deportesPorAlumno[row.alumno_id] = [];
         deportesPorAlumno[row.alumno_id].push({
+          inscripcion_id: row.inscripcion_id,
           deporte: row.deporte,
           precio: parseFloat(row.precio_mensual || 0),
           estado: row.estado_inscripcion
         });
       });
     }
+
+    const asistenciasPorAlumno = {};
+    if (alumnoIds.length > 0) {
+      const [asistenciaRows] = await db.query(`
+        SELECT ast.alumno_id,
+               sub.max_fecha AS ultima_fecha,
+               MAX(CASE WHEN ast.fecha = sub.max_fecha THEN ast.presente ELSE NULL END) AS ultimo_presente,
+               SUM(ast.presente = 1) AS total_presentes,
+               SUM(ast.presente = 0) AS total_ausentes,
+               COUNT(*) AS total_registros
+        FROM asistencias ast
+        JOIN (
+          SELECT alumno_id, MAX(fecha) AS max_fecha
+          FROM asistencias
+          WHERE alumno_id IN (${phAlumnos})
+          GROUP BY alumno_id
+        ) sub ON ast.alumno_id = sub.alumno_id
+        GROUP BY ast.alumno_id, sub.max_fecha
+      `, alumnoIds);
+
+      asistenciaRows.forEach(row => {
+        asistenciasPorAlumno[row.alumno_id] = {
+          total_registros: row.total_registros || 0,
+          total_presentes: row.total_presentes || 0,
+          total_ausentes: row.total_ausentes || 0,
+          ultima_fecha: row.ultima_fecha ? new Date(row.ultima_fecha).toISOString().split('T')[0] : null,
+          ultimo_presente: row.ultimo_presente === 1
+        };
+      });
+    }
+
     pagos.forEach(p => {
       p.deportes_inscritos = deportesPorAlumno[p.alumno_id] || [];
+      p.asistencia_resumen = asistenciasPorAlumno[p.alumno_id] || {
+        total_registros: 0,
+        total_presentes: 0,
+        total_ausentes: 0,
+        ultima_fecha: null,
+        ultimo_presente: null
+      };
     });
 
     res.json({ success: true, pagos });
@@ -2554,14 +2595,6 @@ app.post('/api/alumno/cancelar-deporte', async (req, res) => {
 app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
   try {
     const { usuario, email, password, contrasena } = req.body;
-    
-    // LOG TEMPORAL PARA DEBUG
-    console.log('🔍 LOGIN ATTEMPT:', {
-      usuario,
-      email,
-      password: password ? '***' : undefined,
-      contrasena: contrasena ? '***' : undefined
-    });
     
     // Aceptar tanto 'password' como 'contrasena' y 'usuario' o 'email'
     const passwordInput = password || contrasena;
