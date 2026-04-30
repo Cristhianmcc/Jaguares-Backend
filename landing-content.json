@@ -344,10 +344,45 @@
       "nombre": "MIZUNO"
     }
   ],
+  "pagos": {
+    "plin": {
+      "numero": "+51923472307",
+      "destinatario": "Oscar Orosco",
+      "qr_url": "/assets/uploads/landing-1777504694288-uq54f.jpeg"
+    },
+    "yape": {
+      "numero": "+51923472307",
+      "alias": "Oscar Orosco"
+    },
+    "transferencias": [
+      {
+        "codigo": "BBVA",
+        "nombre": "BBVA",
+        "cuenta": "001108140277791167",
+        "cci": "01181400027779116714",
+        "titular": "Oscar Orosco",
+        "logo": "assets/logo-bbva.jpg"
+      },
+      {
+        "codigo": "BCP",
+        "nombre": "BCP",
+        "cuenta": "19407824258089",
+        "cci": "00219410782425808997",
+        "titular": "Oscar Orosco Aldonate",
+        "logo": "assets/logo-bcp.jpg"
+      },
+      {
+        "codigo": "OTRO",
+        "nombre": "Otro Banco",
+        "cuenta": "",
+        "cci": "",
+        "titular": "",
+        "logo": ""
+      }
+    ]
+  },
   "_meta": {
-    "ultimaActualizacion": "2026-03-03T20:19:33.052Z",
-    "actualizadoPor": "admin",
-    "versionId": 5,
-    "versionLabel": "Publicación · 3/3/2026 03:19 p. m."
+    "ultimaActualizacion": "2026-04-29T23:30:43.423Z",
+    "actualizadoPor": "admin"
   }
 }

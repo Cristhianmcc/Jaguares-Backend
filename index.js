@@ -6308,7 +6308,19 @@ function leerLandingContent() {
 app.get('/api/admin/landing-content', async (req, res) => {
   try {
     const content = leerLandingContent();
-    if (!content) return res.status(404).json({ success: false, error: 'Contenido no encontrado' });
+    console.log('[GET /api/admin/landing-content] Contenido leído:', {
+      success: !!content,
+      tienePageos: !!content?.pagos,
+      paginosKeys: content?.pagos ? Object.keys(content.pagos) : [],
+      plinExiste: !!content?.pagos?.plin,
+      plin: content?.pagos?.plin
+    });
+    
+    if (!content) {
+      console.error('[GET /api/admin/landing-content] Contenido NULL');
+      return res.status(404).json({ success: false, error: 'Contenido no encontrado' });
+    }
+    
     res.json({ success: true, data: content });
   } catch (error) {
     console.error('Error leyendo landing-content:', error);
