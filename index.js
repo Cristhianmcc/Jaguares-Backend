@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import fs from 'fs';
@@ -301,8 +301,9 @@ app.get('/api/horarios', async (req, res) => {
         const params = [];
         
         // Agregar filtro por edad si se proporciona anio de nacimiento
+        // IMPORTANTE: Si ano_min o ano_max son NULL/0, el horario se muestra para TODOS (sin restricción de edad)
         if (anioNacimiento) {
-          query += ` AND ? BETWEEN h.ano_min AND h.ano_max`;
+          query += ` AND (h.ano_min IS NULL OR h.ano_max IS NULL OR h.ano_min = 0 OR h.ano_max = 0 OR ? BETWEEN h.ano_min AND h.ano_max)`;
           params.push(parseInt(anioNacimiento));
         }
         
@@ -857,7 +858,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
     }
     console.log('🗑️ CACHÉ INVALIDADO');
 
-    // ==================== SINCRONIZAR CON APPS SCRIPT EN BACKGROUND (NO BLOQUEANTE) ====================
+    // ==================== SINCRONIZAR CON APPS SCRIPT EN BACKGROUND CON REINTENTOS ====================
     // Disparar la sincronización en background sin bloquear la respuesta al usuario
     setImmediate(() => {
       const payload = {
@@ -867,18 +868,41 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         alumno,
         horarios
       };
-      console.log('📤 [BG] Enviando a Apps Script en background...');
-      Promise.race([
-        fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        }).then(r => r.json()),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5min')), 300000))
-      ])
+      const payloadStr = JSON.stringify(payload);
+      console.log(`📤 [BG] Enviando a Apps Script - Código: ${codigoOperacion}`);
+      
+      // Función con reintentos automáticos
+      const sincronizarConReintentos = async (intento = 1, maxIntentos = 3) => {
+        try {
+          const response = await Promise.race([
+            fetch(APPS_SCRIPT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payloadStr
+            }).then(r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+              return r.json();
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5min')), 300000))
+          ]);
+          return response;
+        } catch (err) {
+          if (intento < maxIntentos) {
+            const delayMs = Math.pow(2, intento) * 1000;
+            console.warn(`⚠️ [BG] Intento ${intento}/${maxIntentos} falló - Código: ${codigoOperacion}`);
+            console.warn(`   Error: ${err.message} - Reintentando en ${delayMs/1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            return sincronizarConReintentos(intento + 1, maxIntentos);
+          } else {
+            throw err;
+          }
+        }
+      };
+      
+      sincronizarConReintentos()
       .then(async (appsScriptResponse) => {
         if (appsScriptResponse.success) {
-          console.log('✅ [BG] Apps Script sync exitoso - Datos en Google Sheets');
+          console.log(`✅ [BG] Apps Script exitoso - Código: ${codigoOperacion}`);
           // Actualizar URLs de documentos si están disponibles
           if (appsScriptResponse.urls_documentos && inscripcionData && db) {
             try {
@@ -897,53 +921,76 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                   inscripcionData.alumnoId
                 ]
               );
-              console.log('✅ [BG] URLs de documentos actualizadas en MySQL');
+              console.log(`✅ [BG] URLs guardadas en MySQL - Código: ${codigoOperacion}`);
             } catch (e) {
-              console.error('❌ [BG] Error actualizando URLs:', e.message);
+              console.error(`❌ [BG] Error guardando URLs - Código: ${codigoOperacion}:`, e.message);
             }
+          } else {
+            console.warn(`⚠️ [BG] Apps Script exitoso pero sin URLs - Código: ${codigoOperacion}`);
           }
           
           // ====== SUBIR COMPROBANTE DESPUÉS DE QUE LA INSCRIPCIÓN SE SINCRONIZÓ ======
           // Esto evita race condition: carpeta ya existe + PAGOS ya tiene el código
           if (comprobante && comprobante.imagen && comprobante.nombre_archivo) {
-            console.log('📸 [BG] Subiendo comprobante encadenado tras inscripción exitosa...');
+            console.log(`📸 [BG] Subiendo comprobante - Código: ${codigoOperacion}`);
+            
+            // Función con reintentos para comprobante
+            const subirComprobanteConReintentos = async (intento = 1, maxIntentos = 3) => {
+              try {
+                return await Promise.race([
+                  fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      token: APPS_SCRIPT_TOKEN,
+                      action: 'subir_comprobante',
+                      codigo_operacion: codigoOperacion,
+                      dni: alumno.dni,
+                      alumno: `${alumno.nombres} ${alumno.apellidos || alumno.apellidoPaterno || ''}`,
+                      imagen: comprobante.imagen,
+                      nombre_archivo: comprobante.nombre_archivo,
+                      metodo_pago: comprobante.metodo_pago || 'Plin/QR'
+                    })
+                  }).then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                    return r.json();
+                  }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout comprobante 3min')), 180000))
+                ]);
+              } catch (err) {
+                if (intento < maxIntentos) {
+                  const delayMs = Math.pow(2, intento) * 1000;
+                  console.warn(`⚠️ [BG] Comprobante intento ${intento}/${maxIntentos} falló - Código: ${codigoOperacion}`);
+                  console.warn(`   Error: ${err.message} - Reintentando en ${delayMs/1000}s...`);
+                  await new Promise(resolve => setTimeout(resolve, delayMs));
+                  return subirComprobanteConReintentos(intento + 1, maxIntentos);
+                } else {
+                  throw err;
+                }
+              }
+            };
+            
             try {
-              const compResp = await Promise.race([
-                fetch(APPS_SCRIPT_URL, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    token: APPS_SCRIPT_TOKEN,
-                    action: 'subir_comprobante',
-                    codigo_operacion: codigoOperacion,
-                    dni: alumno.dni,
-                    alumno: `${alumno.nombres} ${alumno.apellidos || alumno.apellidoPaterno || ''}`,
-                    imagen: comprobante.imagen,
-                    nombre_archivo: comprobante.nombre_archivo,
-                    metodo_pago: comprobante.metodo_pago || 'Plin/QR'
-                  })
-                }).then(r => r.json()),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout comprobante 3min')), 180000))
-              ]);
+              const compResp = await subirComprobanteConReintentos();
               if (compResp.success && compResp.url_comprobante && db) {
                 await db.query(
                   `UPDATE alumnos SET comprobante_pago_url = ? WHERE alumno_id = ?`,
                   [compResp.url_comprobante, inscripcionData.alumnoId]
                 );
-                console.log(`✅ [BG] Comprobante subido a Drive: ${compResp.url_comprobante}`);
+                console.log(`✅ [BG] Comprobante subido - Código: ${codigoOperacion}`);
               } else {
-                console.error('❌ [BG] Apps Script error al subir comprobante encadenado:', compResp.error);
+                console.error(`❌ [BG] Comprobante falló - Código: ${codigoOperacion}:`, compResp.error);
               }
             } catch (compErr) {
-              console.error('❌ [BG] Falló subida de comprobante encadenado:', compErr.message);
+              console.error(`❌ [BG] Error subida comprobante - Código: ${codigoOperacion}:`, compErr.message);
             }
           }
         } else {
-          console.error('❌ [BG] Apps Script retornó error (inscripción ya guardada en MySQL):', appsScriptResponse.error);
+          console.error(`❌ [BG] Apps Script error - Código: ${codigoOperacion}:`, appsScriptResponse.error);
         }
       })
       .catch(err => {
-        console.error('❌ [BG] Apps Script falló (inscripción ya guardada en MySQL):', err.message);
+        console.error(`❌ [BG] Apps Script falló (máx 3 reintentos) - Código: ${codigoOperacion}:`, err.message);
       });
     });
     
@@ -2230,41 +2277,80 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 
     let [pagos] = await db.query(query, params);
 
-    if (estado === 'pendiente') {
-      const pendienteParams = [filtroMes, filtroAnio];
-      let pendientesQuery = `
-        SELECT a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
-               a.telefono, a.telefono_apoderado
-        FROM alumnos a
-        JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')
-        LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.${colYear} = ?`
-      ;
-      if (deporte) {
-        pendientesQuery += ' JOIN deportes d ON i.deporte_id = d.deporte_id';
-      }
-      pendientesQuery += ' WHERE pm.pago_id IS NULL';
-      if (deporte) {
-        pendientesQuery += ' AND UPPER(d.nombre) = UPPER(?)';
-        pendienteParams.push(deporte);
-      }
-      if (buscar) {
-        pendientesQuery += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
-        const like = `%${buscar}%`;
-        pendienteParams.push(like, like, like, like);
-      }
-      pendientesQuery += ' GROUP BY a.alumno_id';
+    if (estado === 'pendiente' || estado === 'todos') {
+      // 📅 MESES A REVISAR:
+      // Si el admin seleccionó un mes específico → solo ese mes (comportamiento original).
+      // Si no seleccionó mes (campo vacío = "Todos los meses") → busca en TODOS los meses
+      // desde el inicio de operaciones (abril 2026) hasta el mes actual, para que el admin
+      // pueda ver los alumnos que deben de meses anteriores sin tener que filtrar uno a uno.
+      const MESES_ORDEN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const MES_INICIO_OPERACIONES = 'abril'; // Primer mes de pagos del sistema
 
-      const [sinPago] = await db.query(pendientesQuery, pendienteParams);
-      if (sinPago.length > 0) {
-        const alumnoIds = sinPago.map(row => row.alumno_id);
-        const placeholders = alumnoIds.map(() => '?').join(',');
-        const montoParams = [...alumnoIds];
+      let mesesABuscar;
+      if (mes) {
+        // Mes específico seleccionado → comportamiento original
+        mesesABuscar = [mes];
+      } else {
+        // Sin mes seleccionado → buscar desde abril hasta el mes actual
+        const idxInicio = MESES_ORDEN.indexOf(MES_INICIO_OPERACIONES);
+        const mesActualNorm = mesActual.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const idxActual = MESES_ORDEN.findIndex(m => m.normalize('NFD').replace(/[\u0300-\u036f]/g, '') === mesActualNorm);
+        const idxFin = idxActual >= 0 ? idxActual : MESES_ORDEN.length - 1;
+        mesesABuscar = MESES_ORDEN.slice(idxInicio, idxFin + 1);
+      }
+
+      // Ejecutar la query de "sin pago" para cada mes a revisar
+      const todasFaltantes = []; // { ...alumno, _mes, _mIdx }
+
+      for (let mIdx = 0; mIdx < mesesABuscar.length; mIdx++) {
+        const mesRevision = mesesABuscar[mIdx];
+        const pendienteParamsMes = [mesRevision, filtroAnio];
+        
+        // Calcular el último día del mes en revisión para filtrar por fecha de inscripción
+        const mesNumero = MESES_ORDEN.indexOf(mesRevision) + 1;
+        const ultimoDiaMes = new Date(filtroAnio, mesNumero, 0); // día 0 del mes siguiente = último día del mes actual
+        const fechaLimite = `${filtroAnio}-${String(mesNumero).padStart(2, '0')}-${String(ultimoDiaMes.getDate()).padStart(2, '0')} 23:59:59`;
+
+        let pendientesQuery = `
+          SELECT a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
+                 a.telefono, a.telefono_apoderado
+          FROM alumnos a
+          JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')
+          LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.${colYear} = ?`;
+
+        if (deporte) {
+          pendientesQuery += ' JOIN deportes d ON i.deporte_id = d.deporte_id';
+        }
+        pendientesQuery += ' WHERE pm.pago_id IS NULL AND i.created_at <= ?';
+        pendienteParamsMes.push(fechaLimite);
+        
+        if (deporte) {
+          pendientesQuery += ' AND UPPER(d.nombre) = UPPER(?)';
+          pendienteParamsMes.push(deporte);
+        }
+        if (buscar) {
+          pendientesQuery += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
+          const like = `%${buscar}%`;
+          pendienteParamsMes.push(like, like, like, like);
+        }
+        pendientesQuery += ' GROUP BY a.alumno_id';
+
+        const [sinPagoMes] = await db.query(pendientesQuery, pendienteParamsMes);
+        sinPagoMes.forEach(row => {
+          todasFaltantes.push({ ...row, _mes: mesRevision, _mIdx: mIdx });
+        });
+      }
+
+      if (todasFaltantes.length > 0) {
+        // Obtener montos solo una vez para todos los alumnos únicos
+        const alumnoIdsUnicos = [...new Set(todasFaltantes.map(r => r.alumno_id))];
+        const placeholders = alumnoIdsUnicos.map(() => '?').join(',');
+        const montoParams = [...alumnoIdsUnicos];
         let montoQuery = `
           SELECT i.alumno_id, SUM(i.precio_mensual) AS monto
           FROM inscripciones i
           JOIN deportes d ON i.deporte_id = d.deporte_id
-          WHERE i.alumno_id IN (${placeholders}) AND i.estado IN ('activa','pendiente')`
-        ;
+          WHERE i.alumno_id IN (${placeholders}) AND i.estado IN ('activa','pendiente')`;
         if (deporte) {
           montoQuery += ' AND UPPER(d.nombre) = UPPER(?)';
           montoParams.push(deporte);
@@ -2275,15 +2361,17 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         const montoMap = {};
         montos.forEach(row => { montoMap[row.alumno_id] = parseFloat(row.monto || 0); });
 
-        const faltantes = sinPago.map(row => ({
-          pago_id: -row.alumno_id,
+        // Crear una fila virtual por cada alumno×mes faltante.
+        // El pago_id virtual usa -(alumnoId * 100 + mIdx) para ser único entre meses.
+        const faltantes = todasFaltantes.map(row => ({
+          pago_id: -(row.alumno_id * 100 + row._mIdx),
           alumno_id: row.alumno_id,
           dni: row.dni,
           nombres: row.nombres,
           apellidos: `${row.apellido_paterno} ${row.apellido_materno}`,
           telefono: row.telefono,
           telefono_apoderado: row.telefono_apoderado,
-          mes: filtroMes,
+          mes: row._mes,
           [colYear]: filtroAnio,
           año: filtroAnio,
           monto: montoMap[row.alumno_id] || 0,
@@ -5906,6 +5994,25 @@ app.post('/api/cache/clear', (req, res) => {
 
 // ==================== ENDPOINTS DE REUBICACIONES ====================
 
+// Endpoint secreto para reparar cupos desfasados
+app.get('/api/admin/reparar-cupos', async (req, res) => {
+  try {
+    await db.query(`
+      UPDATE horarios h
+      SET cupos_ocupados = (
+          SELECT COUNT(*) 
+          FROM inscripcion_horarios ih 
+          INNER JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id 
+          WHERE ih.horario_id = h.horario_id 
+          AND i.estado != 'cancelada'
+      )
+    `);
+    res.json({ success: true, message: 'Todos los cupos han sido recalculados y sincronizados correctamente' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Obtener deportes con sus categorías para reubicaciones
 app.get('/api/admin/reubicaciones/deportes', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
@@ -6206,12 +6313,7 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
     `, [inscripcionId, deporteId]);
 
     // Liberar cupos de TODOS los horarios anteriores
-    for (const horario of todosHorariosActuales) {
-      await connection.query(
-        'UPDATE horarios SET cupos_ocupados = cupos_ocupados - 1 WHERE horario_id = ? AND cupos_ocupados > 0',
-        [horario.horario_id]
-      );
-    }
+    // (El TRIGGER after_inscripcion_horario_delete liberará los cupos automáticamente)
 
     // Eliminar TODOS los horarios anteriores de esta inscripción para este deporte
     if (todosHorariosActuales.length > 0) {
@@ -6222,12 +6324,9 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       );
     }
 
-    // Ocupar cupos e insertar TODOS los nuevos horarios asignados
+    // Insertar TODOS los nuevos horarios asignados
+    // (El TRIGGER after_inscripcion_horario_insert ocupará los cupos automáticamente)
     for (const horario of horariosAsignados) {
-      await connection.query(
-        'UPDATE horarios SET cupos_ocupados = cupos_ocupados + 1 WHERE horario_id = ?',
-        [horario.horario_id]
-      );
       await connection.query(
         'INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
         [inscripcionId, horario.horario_id]
@@ -8920,6 +9019,40 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
       WHERE alumno_id = ? AND estado = 'pendiente'
     `, [alumno.alumno_id]);
     
+    // ==================== REGISTRAR PAGO MENSUAL DEL MES ACTUAL ====================
+    // Cuando el admin confirma la inscripción, el pago de inscripción ya cubre
+    // el primer mes. Se inserta un pago_mensual confirmado para que el alumno
+    // no aparezca como "pendiente" en el reporte de pagos del mes.
+    try {
+      const ahora = new Date();
+      // El sistema usa nombres de mes en español (igual que el resto de pagos_mensuales)
+      const mesNombreActual = ahora.toLocaleString('es-PE', { month: 'long' }).toLowerCase().split(' ')[0];
+      const anioActual = ahora.getFullYear();
+      // Usar la misma columna dinámica que el resto del sistema (puede ser 'año' o 'anio')
+      const colYear = global.COL_ANIO || 'anio';
+
+      // Calcular monto total de las mensualidades activas del alumno
+      const [inscripcionesActivas] = await db.query(`
+        SELECT SUM(precio_mensual) as total_mensual
+        FROM inscripciones
+        WHERE alumno_id = ? AND estado = 'activa'
+      `, [alumno.alumno_id]);
+      const montoMensual = parseFloat(inscripcionesActivas[0]?.total_mensual || 0);
+
+      if (montoMensual > 0) {
+        // INSERT IGNORE evita duplicados si ya existe el pago del mes
+        await db.query(
+          'INSERT IGNORE INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, estado, fecha_pago, created_at) ' +
+          "VALUES (?, ?, ?, ?, 'confirmado', NOW(), NOW())",
+          [alumno.alumno_id, mesNombreActual, anioActual, montoMensual]
+        );
+        console.log(`✅ Pago mensual de ${mesNombreActual}/${anioActual} registrado como confirmado para alumno ID ${alumno.alumno_id} (S/ ${montoMensual})`);
+      }
+    } catch (pagoError) {
+      // No fallar la confirmación si esto falla
+      console.warn('⚠️ No se pudo registrar pago mensual automático:', pagoError.message);
+    }
+
     // Obtener inscripciones activadas
     const [inscripcionesActivadas] = await db.query(`
       SELECT 
