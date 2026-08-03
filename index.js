@@ -59,34 +59,53 @@ async function initDatabase() {
     await connection.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
     console.log('✅ Conexión a MySQL establecida correctamente (utf8mb4)');
     
-    // Obtener nombre real de la columna "año" para evitar problemas de encoding con ñ
+    // Establecer nombre de columna "año" con valor seguro por defecto ANTES de intentar detectarlo.
+    // Usamos unicode escape ('a\u00f1o' = 'año') para evitar problemas de encoding en el archivo fuente.
+    global.COL_ANIO = 'a\u00f1o';
+
+    // Intentar detectar el nombre real de la columna desde la BD (puede ser 'año' o 'anio')
     try {
       const [cols] = await connection.query('SHOW COLUMNS FROM pagos_mensuales');
-      const yearCol = cols.find(c => c.Type === 'int' && c.Field !== 'pago_id' && c.Field !== 'alumno_id' && c.Field !== 'monto');
+
+      // Buscar EXPLÍCITAMENTE por nombre: primero 'año', luego 'anio' (más seguro que buscar por tipo)
+      const yearCol = cols.find(c =>
+        c.Field === 'a\u00f1o' || // columna con ñ (lo más común)
+        c.Field === 'anio'         // columna sin ñ (fallback alternativo)
+      );
+
       if (yearCol) {
         global.COL_ANIO = yearCol.Field;
-        console.log('✅ Columna año detectada como:', global.COL_ANIO);
+        console.log('\u2705 Columna a\u00f1o detectada como:', global.COL_ANIO);
+      } else {
+        // No se encontró ni 'año' ni 'anio' — mantener el default 'año' ya establecido
+        console.warn('\u26a0\ufe0f  Columna a\u00f1o no encontrada por nombre exacto, usando default:', global.COL_ANIO);
+        console.warn('   Columnas disponibles:', cols.map(c => c.Field).join(', '));
       }
+
       // Agregar columna observaciones si no existe
       const tieneObs = cols.find(c => c.Field === 'observaciones');
       if (!tieneObs) {
         await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN observaciones TEXT NULL');
-        console.log('✅ Columna observaciones agregada a pagos_mensuales');
+        console.log('\u2705 Columna observaciones agregada a pagos_mensuales');
       }
       // Migrar unique key para permitir pagos parciales (split por deporte)
       try {
         const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
         if (indexes.length > 0) {
-          const colAnio = global.COL_ANIO || 'anio';
+          const colAnio = global.COL_ANIO; // ya tiene el valor correcto garantizado
           // Primero crear índice alternativo para la FK (MySQL lo necesita)
           await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_id (alumno_id)');
           // Ahora sí podemos eliminar el unique
           await connection.query('ALTER TABLE pagos_mensuales DROP INDEX unique_alumno_mes');
           await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_mes (alumno_id, mes, `' + colAnio + '`)');
-          console.log('✅ Migrado unique_alumno_mes → idx_alumno_mes (permite pagos parciales)');
+          console.log('\u2705 Migrado unique_alumno_mes \u2192 idx_alumno_mes (permite pagos parciales)');
         }
-      } catch (migErr) { console.warn('⚠️ Migración unique key:', migErr.message); }
-    } catch (e) { /* tabla puede no existir aún */ }
+      } catch (migErr) { console.warn('\u26a0\ufe0f Migraci\u00f3n unique key:', migErr.message); }
+    } catch (e) {
+      // La tabla puede no existir aún en el primer arranque — es esperado
+      console.warn('\u26a0\ufe0f  No se pudo consultar pagos_mensuales al arrancar:', e.message);
+      console.warn('   Se usar\u00e1 el nombre de columna por defecto:', global.COL_ANIO);
+    }
     
     connection.release();
   } catch (error) {
@@ -2173,7 +2192,7 @@ app.post('/api/pago-mensual', async (req, res) => {
     const anioActual = fechaActual.getFullYear();
     
     // Registrar en MySQL el pago mensual
-    const colYear = global.COL_ANIO || 'anio';
+    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
     // Buscar si ya existe un pago pendiente para este alumno/mes/año
     const [existePago] = await db.query(
       'SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND mes = ? AND `' + colYear + '` = ? AND estado = "pendiente" LIMIT 1',
@@ -2220,7 +2239,7 @@ app.post('/api/pago-mensual', async (req, res) => {
 app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '' } = req.query;
-    const colYear = global.COL_ANIO || 'anio';
+    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
     const ahora = new Date();
     const mesActual = ahora.toLocaleString('es-PE', { month: 'long' });
     const anioActual = ahora.getFullYear();
@@ -2497,7 +2516,7 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
     if (deportes_pendientes && deportes_pendientes.length > 0) {
       const montoPendiente = deportes_pendientes.reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
       const nombresPendientes = deportes_pendientes.map(d => d.deporte).join(', ');
-      const colYear = global.COL_ANIO || 'anio';
+      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
       // Obtener el año del pago original
       const [pagoOriginal] = await db.query('SELECT `' + colYear + '` as anio_val FROM pagos_mensuales WHERE pago_id = ?', [id]);
       const anioVal = pagoOriginal[0]?.anio_val || new Date().getFullYear();
@@ -9029,7 +9048,7 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
       const mesNombreActual = ahora.toLocaleString('es-PE', { month: 'long' }).toLowerCase().split(' ')[0];
       const anioActual = ahora.getFullYear();
       // Usar la misma columna dinámica que el resto del sistema (puede ser 'año' o 'anio')
-      const colYear = global.COL_ANIO || 'anio';
+      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
 
       // Calcular monto total de las mensualidades activas del alumno
       const [inscripcionesActivas] = await db.query(`
