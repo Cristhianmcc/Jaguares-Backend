@@ -2238,7 +2238,8 @@ app.post('/api/pago-mensual', async (req, res) => {
  */
 app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
-    const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '' } = req.query;
+    const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '', grupo = '' } = req.query;
+    console.log(`📋 pagos-mensuales → estado=${estado} mes=${mes} deporte=${deporte} grupo=${grupo} buscar=${buscar}`);
     const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
     const ahora = new Date();
     const mesActual = ahora.toLocaleString('es-PE', { month: 'long' });
@@ -2246,7 +2247,12 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     const filtroMes = mes || mesActual;
     const filtroAnio = anio ? parseInt(anio, 10) : anioActual;
 
-    let query = 
+    // Necesitamos JOIN a inscripciones/deportes si hay filtro de deporte o categoría
+    const necesitaJoinDeporte = !!(deporte || grupo);
+    // Necesitamos JOIN a horarios si hay filtro de categoría
+    const necesitaJoinHorario = !!grupo;
+
+    let query =
       'SELECT ' +
       'pm.*, ' +
       'a.dni, ' +
@@ -2256,13 +2262,17 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       "CONCAT(a.apellido_paterno, ' ', a.apellido_materno) as apellidos " +
       'FROM pagos_mensuales pm ' +
       'JOIN alumnos a ON pm.alumno_id = a.alumno_id ';
-    
-    // Si hay filtro de deporte, hacer JOIN con inscripciones y deportes
-    if (deporte) {
+
+    if (necesitaJoinDeporte) {
       query += 'JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN (\'activa\',\'pendiente\') ' +
                'JOIN deportes d ON i.deporte_id = d.deporte_id ';
     }
-    
+    if (necesitaJoinHorario) {
+      // JOIN para filtrar por categoría del horario
+      query += 'JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id ' +
+               'JOIN horarios h ON h.horario_id = ih.horario_id ';
+    }
+
     query += 'WHERE 1=1';
     const params = [];
 
@@ -2281,14 +2291,18 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       query += ' AND UPPER(d.nombre) = UPPER(?)';
       params.push(deporte);
     }
+    if (grupo) {
+      query += ' AND h.categoria = ?';
+      params.push(grupo);
+    }
     if (buscar) {
       query += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
       const like = `%${buscar}%`;
       params.push(like, like, like, like);
     }
 
-    // GROUP BY para evitar duplicados cuando un alumno tiene múltiples inscripciones en el mismo deporte
-    if (deporte) {
+    // GROUP BY para evitar duplicados cuando un alumno tiene múltiples inscripciones
+    if (necesitaJoinDeporte || necesitaJoinHorario) {
       query += ' GROUP BY pm.pago_id';
     }
 
@@ -2334,18 +2348,30 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
           SELECT a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
                  a.telefono, a.telefono_apoderado
           FROM alumnos a
-          JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')
-          LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.${colYear} = ?`;
+          JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')`;
 
-        if (deporte) {
+        // ⚠️ Los JOINs de filtro van ANTES del LEFT JOIN para que MySQL no los ignore
+        if (deporte || grupo) {
           pendientesQuery += ' JOIN deportes d ON i.deporte_id = d.deporte_id';
         }
+        if (grupo) {
+          pendientesQuery += ' JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id' +
+                             ' JOIN horarios h ON h.horario_id = ih.horario_id';
+        }
+
+        // LEFT JOIN al final — así pm.pago_id IS NULL funciona correctamente
+        pendientesQuery += ` LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.\`${colYear}\` = ?`;
+
         pendientesQuery += ' WHERE pm.pago_id IS NULL AND i.created_at <= ?';
         pendienteParamsMes.push(fechaLimite);
-        
+
         if (deporte) {
           pendientesQuery += ' AND UPPER(d.nombre) = UPPER(?)';
           pendienteParamsMes.push(deporte);
+        }
+        if (grupo) {
+          pendientesQuery += ' AND h.categoria = ?';
+          pendienteParamsMes.push(grupo);
         }
         if (buscar) {
           pendientesQuery += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR a.apellido_paterno LIKE ? OR a.apellido_materno LIKE ?)';
@@ -2355,6 +2381,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         pendientesQuery += ' GROUP BY a.alumno_id';
 
         const [sinPagoMes] = await db.query(pendientesQuery, pendienteParamsMes);
+
         sinPagoMes.forEach(row => {
           todasFaltantes.push({ ...row, _mes: mesRevision, _mIdx: mIdx });
         });
