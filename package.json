@@ -8,10 +8,12 @@
     "start": "node index.js",
     "start:cluster": "pm2-runtime start ecosystem.config.cjs",
     "dev": "node index.js",
+    "migrate:cms": "node scripts/migrate-cms.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:security": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/security.test.js",
-    "test:public": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/public.test.js"
+    "test:public": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/public.test.js",
+    "test:cms:unit": "node --test tests/landing-cms.unit.test.js"
   },
   "keywords": [
     "api",

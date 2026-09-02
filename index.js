@@ -9,6 +9,11 @@ import NodeCache from 'node-cache';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import {
+  DEFAULT_LANDING_STRUCTURE,
+  normalizeLandingContent,
+  validateLandingContent
+} from './utils/landing-content.js';
 
 // Importar middlewares de seguridad
 import { verificarAutenticacion, verificarAdmin, generarToken } from './middleware/auth.js';
@@ -6410,14 +6415,45 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
 // ─────────────────────────────────────────────────────────────
 const LANDING_CONTENT_PATH = path.join(__dirname, 'landing-content.json');
 
-// Configurar multer para subida de imágenes de la landing
-const UPLOADS_DIR = path.join(__dirname, '..', 'react', 'public', 'assets', 'uploads');
+// Biblioteca de medios persistente del CMS. En Docker se monta un volumen en esta ruta.
+const UPLOADS_DIR = path.resolve(process.env.CMS_UPLOADS_DIR || path.join(__dirname, 'uploads', 'landing'));
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+app.use('/uploads/landing', express.static(UPLOADS_DIR, {
+  fallthrough: false,
+  immutable: true,
+  maxAge: '30d',
+  index: false
+}));
+
+const IMAGE_MIME_EXTENSIONS = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif'
+};
+
+const getMediaUrl = (req, filename) => {
+  const configuredBase = process.env.CMS_MEDIA_BASE_URL?.replace(/\/$/, '');
+  const mediaPath = `/uploads/landing/${filename}`;
+  return configuredBase ? `${configuredBase}${mediaPath}` : mediaPath;
+};
+
+const registrarMedio = async (req) => {
+  const url = getMediaUrl(req, req.file.filename);
+  const autor = req.user?.username || req.admin?.usuario || 'admin';
+  const [result] = await db.query(
+    `INSERT INTO landing_media (filename, original_name, mime_type, size_bytes, url, created_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, url, autor]
+  );
+  return { id: result.insertId, url, autor };
+};
 
 const imageStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = IMAGE_MIME_EXTENSIONS[file.mimetype] || '';
     const name = `landing-${Date.now()}-${Math.random().toString(36).slice(2,7)}${ext}`;
     cb(null, name);
   }
@@ -6426,17 +6462,23 @@ const imageUpload = multer({
   storage: imageStorage,
   limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB
   fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) return cb(new Error('Solo se permiten imágenes'));
+    if (!IMAGE_MIME_EXTENSIONS[file.mimetype]) {
+      return cb(new Error('Formato no permitido. Usa JPG, PNG, WebP o GIF.'));
+    }
     cb(null, true);
   }
 });
 
 // POST /api/admin/upload-image
-app.post('/api/admin/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
-  const url = `/assets/uploads/${req.file.filename}`;
-  console.log(`[LandingEditor] Imagen subida: ${url}`);
-  res.json({ success: true, url });
+app.post('/api/admin/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+    const media = await registrarMedio(req);
+    console.log(`[LandingEditor] Imagen #${media.id} subida: ${media.url}`);
+    res.status(201).json({ success: true, mediaId: media.id, url: media.url });
+  } catch (error) {
+    next(error);
+  }
 });
 
 
@@ -6476,10 +6518,11 @@ app.get('/api/admin/landing-content', async (req, res) => {
 // PUT /api/admin/landing-content  — escritura protegida (solo admins)
 app.put('/api/admin/landing-content', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
-    const nuevoContenido = req.body;
-    if (!nuevoContenido || typeof nuevoContenido !== 'object') {
-      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    const validation = validateLandingContent(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
     }
+    const nuevoContenido = normalizeLandingContent(req.body);
 
     // Preservar meta y actualizar timestamp
     const actual = leerLandingContent() || {};
@@ -6791,7 +6834,7 @@ app.get('/api/landing', async (req, res) => {
       const content = typeof vRows[0].content === 'string'
         ? JSON.parse(vRows[0].content)
         : vRows[0].content;
-      return res.json({ success: true, source: 'versions', data: content });
+      return res.json({ success: true, source: 'versions', data: normalizeLandingContent(content) });
     }
 
     // Módulo 3 fallback: landing_texts / landing_images
@@ -6800,13 +6843,18 @@ app.get('/api/landing', async (req, res) => {
 
     if (textRows.length === 0 && imageRows.length === 0) {
       const json = leerLandingContent();
-      return res.json({ success: true, source: 'json', data: json });
+      return res.json({ success: true, source: 'json', data: normalizeLandingContent(json) });
     }
 
     const data = rowsToContent(textRows, imageRows);
-    res.json({ success: true, source: 'db', data });
+    res.json({ success: true, source: 'db', data: normalizeLandingContent(data) });
   } catch (error) {
     console.error('[Landing] Error GET /api/landing:', error);
+    const json = leerLandingContent();
+    if (json) {
+      res.set('X-Landing-Source', 'json-fallback');
+      return res.json({ success: true, source: 'json-fallback', data: normalizeLandingContent(json) });
+    }
     res.status(500).json({ success: false, error: 'Error al leer contenido' });
   }
 });
@@ -6817,10 +6865,11 @@ app.get('/api/landing', async (req, res) => {
 app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const conn = await db.getConnection();
   try {
-    const content = req.body;
-    if (!content || typeof content !== 'object') {
-      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    const validation = validateLandingContent(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
     }
+    const content = normalizeLandingContent(req.body);
 
     const { texts, images } = contentToRows(content);
 
@@ -6912,15 +6961,53 @@ app.post('/api/landing/seed', verificarAutenticacion, verificarAdmin, async (req
 // POST /api/landing/upload-image
 // Alias del endpoint de subida de imágenes que ya existe.
 // Usa el mismo middleware multer (imageUpload).
-app.post('/api/landing/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), (req, res) => {
+app.post('/api/landing/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
-    const url = `/assets/uploads/${req.file.filename}`;
-    console.log(`[Landing] Imagen subida: ${url}`);
-    res.json({ success: true, url, originalName: req.file.originalname });
+    const media = await registrarMedio(req);
+    console.log(`[Landing] Imagen #${media.id} subida: ${media.url}`);
+    res.status(201).json({ success: true, mediaId: media.id, url: media.url, originalName: req.file.originalname });
   } catch (error) {
-    console.error('[Landing] Error subiendo imagen:', error);
-    res.status(500).json({ success: false, error: 'Error al subir imagen' });
+    next(error);
+  }
+});
+
+// GET /api/landing/media - biblioteca de imágenes del CMS
+app.get('/api/landing/media', verificarAutenticacion, verificarAdmin, async (_req, res) => {
+  try {
+    const [media] = await db.query(
+      `SELECT id, filename, original_name, mime_type, size_bytes, width, height, url, alt_text, created_by, created_at
+       FROM landing_media ORDER BY created_at DESC, id DESC LIMIT 300`
+    );
+    res.json({ success: true, media });
+  } catch (error) {
+    console.error('[Landing] Error listando medios:', error);
+    res.status(500).json({ success: false, error: 'No se pudo cargar la biblioteca de imágenes.' });
+  }
+});
+
+// DELETE /api/landing/media/:id - solo elimina archivos administrados por el CMS
+app.delete('/api/landing/media/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, error: 'Identificador de imagen inválido.' });
+    }
+    const [rows] = await db.query('SELECT filename FROM landing_media WHERE id = ?', [id]);
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Imagen no encontrada.' });
+
+    const target = path.resolve(UPLOADS_DIR, rows[0].filename);
+    const safePrefix = `${UPLOADS_DIR}${path.sep}`;
+    if (!target.startsWith(safePrefix)) {
+      return res.status(400).json({ success: false, error: 'Ruta de imagen inválida.' });
+    }
+
+    await db.query('DELETE FROM landing_media WHERE id = ?', [id]);
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+    res.json({ success: true, message: 'Imagen eliminada de la biblioteca.' });
+  } catch (error) {
+    console.error('[Landing] Error eliminando medio:', error);
+    res.status(500).json({ success: false, error: 'No se pudo eliminar la imagen.' });
   }
 });
 
@@ -6974,12 +7061,13 @@ app.get('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, asy
 // Requiere autenticación de admin.
 app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
-    const content = req.body;
-    if (!content || typeof content !== 'object') {
-      return res.status(400).json({ success: false, error: 'Cuerpo inválido' });
+    const validation = validateLandingContent(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
     }
+    const content = normalizeLandingContent(req.body);
 
-    const autor = req.usuario?.email || 'admin';
+    const autor = req.user?.username || req.admin?.usuario || 'admin';
     const now   = new Date();
     const label  = content._draftLabel
       || `Borrador · ${now.toLocaleDateString('es-PE')} ${now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`;
@@ -7015,7 +7103,7 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
   const conn = await db.getConnection();
   try {
     const { id } = req.params;
-    const autor   = req.usuario?.email || 'admin';
+    const autor   = req.user?.username || req.admin?.usuario || 'admin';
 
     // 1. Verificar que la versión existe y está en estado válido
     const [rows] = await conn.query(
@@ -7023,7 +7111,6 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
       [id]
     );
     if (rows.length === 0) {
-      conn.release();
       return res.status(404).json({ success: false, error: 'Versión no encontrada' });
     }
     const version = rows[0];
@@ -7031,9 +7118,14 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
       // Permitir rollback desde archivado — continuar igual
     }
 
-    const content = typeof version.content === 'string'
+    const rawContent = typeof version.content === 'string'
       ? JSON.parse(version.content)
       : version.content;
+    const validation = validateLandingContent(rawContent);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: 'La versión contiene datos inválidos.', details: validation.errors });
+    }
+    const content = normalizeLandingContent(rawContent);
 
     await conn.beginTransaction();
 
@@ -7131,21 +7223,6 @@ app.delete('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, 
 // MÓDULO 6 — ORDEN DE SECCIONES (landing_structure)
 // ==============================================================
 
-// SECCIONES POR DEFECTO (refleja el orden actual de Home.jsx)
-const DEFAULT_SECTION_STRUCTURE = [
-  { section_slug: 'hero',           orden: 10,  visible: 1 },
-  { section_slug: 'partidos',       orden: 20,  visible: 1 },
-  { section_slug: 'deportes',       orden: 30,  visible: 1 },
-  { section_slug: 'ranking',        orden: 40,  visible: 1 },
-  { section_slug: 'estadisticas',   orden: 50,  visible: 1 },
-  { section_slug: 'cta',            orden: 60,  visible: 1 },
-  { section_slug: 'docentes',       orden: 70,  visible: 1 },
-  { section_slug: 'novedades',      orden: 80,  visible: 1 },
-  { section_slug: 'patrocinadores', orden: 90,  visible: 1 },
-  { section_slug: 'inscripcion',    orden: 100, visible: 1 },
-  { section_slug: 'galeria',        orden: 110, visible: 1 },
-];
-
 // GET /api/landing/structure
 // Público — la landing pública lo consume para ordenar secciones.
 // Si la tabla está vacía devuelve los valores por defecto.
@@ -7154,29 +7231,31 @@ app.get('/api/landing/structure', async (req, res) => {
     // Cache: 60 s browser + stale-while-revalidate 120 s (el orden de secciones cambia poco)
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
 
-    const [rows] = await db.query(
+    const [dbRows] = await db.query(
       `SELECT section_slug, orden, visible FROM landing_structure ORDER BY orden ASC`
     );
+    const allowedSlugs = new Set(DEFAULT_LANDING_STRUCTURE.map(s => s.section_slug));
+    const rows = dbRows.filter(row => allowedSlugs.has(row.section_slug));
 
     // Si la tabla no tiene datos, devolver defaults y no romperse
     if (rows.length === 0) {
-      return res.json({ success: true, source: 'defaults', sections: DEFAULT_SECTION_STRUCTURE });
+      return res.json({ success: true, source: 'defaults', sections: DEFAULT_LANDING_STRUCTURE });
     }
 
     // Mezclar: lo que hay en DB + defaults para secciones no registradas
     const dbSlugs = new Set(rows.map(r => r.section_slug));
-    const missing = DEFAULT_SECTION_STRUCTURE.filter(d => !dbSlugs.has(d.section_slug));
+    const missing = DEFAULT_LANDING_STRUCTURE.filter(d => !dbSlugs.has(d.section_slug));
     const all = [...rows, ...missing].sort((a, b) => a.orden - b.orden);
 
     res.json({ success: true, source: 'db', sections: all });
   } catch (error) {
     // Si la tabla no existe, devolver defaults sin llenar logs de errores
     if (error.code === 'ER_NO_SUCH_TABLE') {
-      return res.json({ success: true, source: 'defaults', sections: DEFAULT_SECTION_STRUCTURE });
+      return res.json({ success: true, source: 'defaults', sections: DEFAULT_LANDING_STRUCTURE });
     }
     console.error('[Structure] Error GET /api/landing/structure:', error);
     // Fallback seguro: nunca romper la landing por fallo de estructura
-    res.json({ success: true, source: 'fallback', sections: DEFAULT_SECTION_STRUCTURE });
+    res.json({ success: true, source: 'fallback', sections: DEFAULT_LANDING_STRUCTURE });
   }
 });
 
@@ -7188,8 +7267,20 @@ app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async
   try {
     const { sections } = req.body;
     if (!Array.isArray(sections) || sections.length === 0) {
-      conn.release();
       return res.status(400).json({ success: false, error: 'Se esperaba sections: [{section_slug, orden, visible}]' });
+    }
+
+    const allowedSlugs = new Set(DEFAULT_LANDING_STRUCTURE.map(s => s.section_slug));
+    const seen = new Set();
+    for (const section of sections) {
+      const order = Number(section.orden);
+      if (!allowedSlugs.has(section.section_slug) || seen.has(section.section_slug)) {
+        return res.status(400).json({ success: false, error: `Sección inválida o duplicada: ${section.section_slug || '(vacía)'}` });
+      }
+      if (!Number.isFinite(order) || order < 0 || order > 1000) {
+        return res.status(400).json({ success: false, error: `Orden inválido para ${section.section_slug}.` });
+      }
+      seen.add(section.section_slug);
     }
 
     await conn.beginTransaction();

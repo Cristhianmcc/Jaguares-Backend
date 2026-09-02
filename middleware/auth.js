@@ -5,9 +5,18 @@
 
 import jwt from 'jsonwebtoken';
 
-// Secret key para JWT (en producción debe estar en .env)
-const JWT_SECRET = process.env.JWT_SECRET || 'jaguares_secret_key_2025_cambiar_en_produccion';
 const JWT_EXPIRES_IN = '8h'; // Token válido por 8 horas
+
+// Se resuelve al usarlo porque index.js carga .env después de importar este módulo.
+// En producción nunca se permite una clave escrita en el código.
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET;
+    if (secret && secret.length >= 32) return secret;
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_SECRET no está configurado o es demasiado corto');
+    }
+    return secret || 'jaguares_desarrollo_local_no_usar_en_produccion_2026';
+};
 
 /**
  * Middleware de autenticación
@@ -32,7 +41,7 @@ export const verificarAutenticacion = (req, res, next) => {
             : authHeader;
 
         // Verificar token
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, getJwtSecret());
         
         // Agregar información del usuario al request
         req.user = decoded;
@@ -83,7 +92,8 @@ export const verificarAdmin = (req, res, next) => {
         });
     }
 
-    if (req.user.role !== 'admin') {
+    const role = req.user.rol || req.user.role;
+    if (!['admin', 'super_admin'].includes(role)) {
         return res.status(403).json({
             success: false,
             error: 'Acceso denegado',
@@ -101,12 +111,12 @@ export const generarToken = (usuario) => {
     const payload = {
         id: usuario.administrador_id,
         username: usuario.username,
-        role: 'admin',
+        role: usuario.rol || 'admin',
         nombre_completo: usuario.nombre_completo,
         rol: usuario.rol || 'admin'
     };
 
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    return jwt.sign(payload, getJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
 };
 
 /**
@@ -114,7 +124,7 @@ export const generarToken = (usuario) => {
  */
 export const verificarToken = (token) => {
     try {
-        return jwt.verify(token, JWT_SECRET);
+        return jwt.verify(token, getJwtSecret());
     } catch (error) {
         return null;
     }
