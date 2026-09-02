@@ -1,0 +1,31 @@
+name: jaguares-cms-dev
+
+services:
+  mysql-dev:
+    image: mysql:8.0
+    container_name: jaguares-mysql-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: jaguares_cms_dev
+      MYSQL_USER: jaguares_dev_user
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      TZ: America/Lima
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - jaguares_mysql_dev_data:/var/lib/mysql
+      - ./docker-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  jaguares_mysql_dev_data:
+    name: jaguares_mysql_dev_data

@@ -12,6 +12,8 @@ npm-debug.log*
 backup-*.sql
 backups-prod/
 *.dump
+docker-init/*.sql
+uploads/
 
 # Archivos de sistema
 .DS_Store
