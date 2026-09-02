@@ -24,8 +24,8 @@ CMS_MEDIA_BASE_URL=https://api.jaguarescar.com
 Antes de desplegar el backend, crea un respaldo de la MySQL del VPS y aplica
 `migrations/20260901_cms_landing_v2.sql` sobre la base existente. La migración
 solo crea tablas `landing_*`; no reemplaza ni elimina alumnos, asistencias,
-pagos o usuarios. No importes la copia completa de `jaguares_cms_dev` sobre
-producción.
+pagos o usuarios, y tampoco inserta filas en `landing_structure`. No importes
+la copia completa de `jaguares_cms_dev` sobre producción.
 
 ## Comprobación después del despliegue
 

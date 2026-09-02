@@ -73,13 +73,5 @@ CREATE TABLE IF NOT EXISTS landing_media (
   KEY idx_landing_media_created_at (created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO landing_structure (section_slug, orden, visible) VALUES
-  ('hero', 10, 1),
-  ('deportes', 20, 1),
-  ('ranking', 30, 1),
-  ('galeria', 40, 1),
-  ('docentes', 50, 1),
-  ('estadisticas', 60, 1),
-  ('cta', 70, 1),
-  ('footer', 80, 1)
-ON DUPLICATE KEY UPDATE section_slug = VALUES(section_slug);
+-- No insertar filas aquí: cada instalación puede conservar un orden público
+-- distinto. La API aporta sus valores por defecto cuando la tabla está vacía.
