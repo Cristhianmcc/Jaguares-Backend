@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import fs from 'fs';
@@ -7065,7 +7065,18 @@ app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (re
     if (!validation.valid) {
       return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
     }
-    const content = normalizeLandingContent(req.body);
+
+    // CRÍTICO: preservar pagos del JSON actual si el editor no los envía
+    const draftBody = { ...req.body };
+    // SIEMPRE inyectar pagos del JSON en el borrador
+    {
+      const currentJson = leerLandingContent();
+      if (currentJson?.pagos) {
+        draftBody.pagos = currentJson.pagos;
+        console.log('[Draft] Pagos preservados desde JSON actual al guardar borrador');
+      }
+    }
+    const content = normalizeLandingContent(draftBody);
 
     const autor = req.user?.username || req.admin?.usuario || 'admin';
     const now   = new Date();
@@ -7121,6 +7132,19 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
     const rawContent = typeof version.content === 'string'
       ? JSON.parse(version.content)
       : version.content;
+
+    // CRÍTICO: preservar pagos del JSON actual si la versión no los incluye
+    // El editor de landing no gestiona pagos, por eso no los envía en el borrador
+    // SIEMPRE inyectar pagos desde el JSON — el CMS nunca gestiona pagos
+    // Esto garantiza que publish nunca sobreescriba el numero de plin/yape
+    {
+      const currentJson = leerLandingContent();
+      if (currentJson?.pagos) {
+        rawContent.pagos = currentJson.pagos;
+        console.log('[Versions] Pagos preservados desde JSON actual al publicar versión');
+      }
+    }
+
     const validation = validateLandingContent(rawContent);
     if (!validation.valid) {
       return res.status(400).json({ success: false, error: 'La versión contiene datos inválidos.', details: validation.errors });

@@ -92,7 +92,7 @@
         "id": 1,
         "image": "/uploads/landing/landing-1788306987159-ep3q9.jpg",
         "sport": "Futbol",
-        "title": "Forjando campeones",
+        "title": "Forjando campeonisimosssssy",
         "accent": "#E03821",
         "subtitle": "Academia de Futbol",
         "description": "Entrenamiento profesional para todas las edades con metodologia de alto rendimiento."
@@ -101,7 +101,7 @@
         "id": 2,
         "image": "/assets/glow/hero-basquet.jpg",
         "sport": "Basquet",
-        "title": "Alcanza nuevas alturas",
+        "title": "Alcanza nuevas alturas y bajas",
         "accent": "#FF6B35",
         "subtitle": "Programa Competitivo",
         "description": "Desarrolla tecnica, estrategia y trabajo en equipo con nuestros entrenadores certificados."
@@ -150,7 +150,7 @@
       "slug": "futbol",
       "fecha": "Inscripciones Abiertas",
       "imagen": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=800&q=80",
-      "titulo": "FÃºtbol - Forja tu camino hacia el Ã©xito",
+      "titulo": "Fútbol - Forja tu camino hacia el éxito",
       "gallery": [
         "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1508098682722-e99c643e7486?w=500&q=80&fit=crop",
@@ -163,51 +163,51 @@
       "heroImage": "/assets/glow/hero-futbol.jpg",
       "categories": [
         {
-          "ages": "4 a 6 aÃ±os",
+          "ages": "4 a 6 años",
           "name": "Pre-Mini",
           "schedule": [
             "Martes y Jueves 16:00 - 17:00"
           ]
         },
         {
-          "ages": "7 a 9 aÃ±os",
+          "ages": "7 a 9 años",
           "name": "Mini",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 16:00 - 17:30"
+            "Lunes, Miércoles y Viernes 16:00 - 17:30"
           ]
         },
         {
-          "ages": "10 a 12 aÃ±os",
+          "ages": "10 a 12 años",
           "name": "Infantil",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 17:30 - 19:00"
+            "Lunes, Miércoles y Viernes 17:30 - 19:00"
           ]
         },
         {
-          "ages": "13 a 16 aÃ±os",
+          "ages": "13 a 16 años",
           "name": "Juvenil",
           "schedule": [
-            "Martes, Jueves y SÃ¡bado 18:00 - 19:30"
+            "Martes, Jueves y Sábado 18:00 - 19:30"
           ]
         },
         {
-          "ages": "+17 aÃ±os",
+          "ages": "+17 años",
           "name": "Mayor",
           "schedule": [
             "Martes y Jueves 20:00 - 21:30",
-            "SÃ¡bado 10:00 - 12:00"
+            "Sábado 10:00 - 12:00"
           ]
         }
       ],
-      "descripcion": "Entrenamiento profesional con metodologÃ­a de alto rendimiento para todas las edades. Desarrolla tÃ©cnica, tÃ¡ctica y valores deportivos.",
-      "longDescription": "Nuestra escuela de fÃºtbol se enfoca en el desarrollo tÃ©cnico, tÃ¡ctico y fÃ­sico de cada jugador. Trabajamos con metodologÃ­as modernas que priorizan el juego asociado, la toma de decisiones y el fair play."
+      "descripcion": "Entrenamiento profesional con metodología de alto rendimiento para todas las edades. Desarrolla técnica, táctica y valores deportivos.",
+      "longDescription": "Nuestra escuela de fútbol se enfoca en el desarrollo técnico, táctico y físico de cada jugador. Trabajamos con metodologías modernas que priorizan el juego asociado, la toma de decisiones y el fair play."
     },
     {
       "id": 2,
       "slug": "basquet",
-      "fecha": "Lunes y MiÃ©rcoles",
+      "fecha": "Lunes y Miércoles",
       "imagen": "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=800&q=80",
-      "titulo": "BÃ¡squet - Alcanza nuevas alturas",
+      "titulo": "Básquet - Alcanza nuevas alturas",
       "gallery": [
         "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1505666287802-931dc83948e9?w=500&q=80&fit=crop",
@@ -220,43 +220,43 @@
       "heroImage": "/assets/glow/hero-basquet.jpg",
       "categories": [
         {
-          "ages": "6 a 9 aÃ±os",
+          "ages": "6 a 9 años",
           "name": "Mini Basket",
           "schedule": [
-            "MiÃ©rcoles y Viernes 16:00 - 17:00"
+            "Miércoles y Viernes 16:00 - 17:00"
           ]
         },
         {
-          "ages": "10 a 12 aÃ±os",
+          "ages": "10 a 12 años",
           "name": "Pre-Infantil",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 17:00 - 18:30"
+            "Lunes, Miércoles y Viernes 17:00 - 18:30"
           ]
         },
         {
-          "ages": "13 a 15 aÃ±os",
+          "ages": "13 a 15 años",
           "name": "Cadetes",
           "schedule": [
-            "Martes, Jueves y SÃ¡bado 17:00 - 18:30"
+            "Martes, Jueves y Sábado 17:00 - 18:30"
           ]
         },
         {
-          "ages": "16 a 18 aÃ±os",
+          "ages": "16 a 18 años",
           "name": "Juvenil",
           "schedule": [
             "Martes y Jueves 19:00 - 20:30"
           ]
         }
       ],
-      "descripcion": "Mejora tu juego en equipo y habilidades tÃ©cnicas con nuestros entrenadores certificados.",
-      "longDescription": "Nuestro programa de bÃ¡squet estÃ¡ diseÃ±ado para desarrollar jugadores completos. Trabajamos fundamentos individuales, sistemas de juego y preparaciÃ³n fÃ­sica especÃ­fica."
+      "descripcion": "Mejora tu juego en equipo y habilidades técnicas con nuestros entrenadores certificados.",
+      "longDescription": "Nuestro programa de básquet está diseñado para desarrollar jugadores completos. Trabajamos fundamentos individuales, sistemas de juego y preparación física específica."
     },
     {
       "id": 3,
       "slug": "voley",
       "fecha": "Martes y Jueves",
       "imagen": "https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&w=800&q=80",
-      "titulo": "VÃ³ley - Potencia tu juego en red",
+      "titulo": "Vóley - Potencia tu juego en red",
       "gallery": [
         "https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1547347298-4074fc3086f0?w=500&q=80&fit=crop",
@@ -264,48 +264,48 @@
         "https://images.unsplash.com/photo-1562552052-d8ef4a40c4ce?w=500&q=80&fit=crop",
         "https://images.unsplash.com/photo-1576610616656-d3aa5d1f4534?w=500&q=80&fit=crop"
       ],
-      "categoria": "FormaciÃ³n",
+      "categoria": "Formación",
       "destacado": false,
       "heroImage": "/assets/glow/hero-voley.jpg",
       "categories": [
         {
-          "ages": "8 a 11 aÃ±os",
-          "name": "IniciaciÃ³n",
+          "ages": "8 a 11 años",
+          "name": "Iniciación",
           "schedule": [
             "Martes y Jueves 16:00 - 17:00"
           ]
         },
         {
-          "ages": "12 a 15 aÃ±os",
+          "ages": "12 a 15 años",
           "name": "Cadetes",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 17:00 - 18:30"
+            "Lunes, Miércoles y Viernes 17:00 - 18:30"
           ]
         },
         {
-          "ages": "16 a 18 aÃ±os",
+          "ages": "16 a 18 años",
           "name": "Juvenil",
           "schedule": [
             "Martes y Jueves 18:30 - 20:00"
           ]
         },
         {
-          "ages": "+18 aÃ±os",
+          "ages": "+18 años",
           "name": "Libre",
           "schedule": [
-            "SÃ¡bado 9:00 - 11:00"
+            "Sábado 9:00 - 11:00"
           ]
         }
       ],
       "descripcion": "Perfecciona tu saque, remate y bloqueo con sesiones intensivas de entrenamiento.",
-      "longDescription": "El vÃ³ley en Jaguares apunta a la formaciÃ³n completa del deportista. Desde tÃ©cnicas individuales hasta juego en equipo, nuestras clases combinan precisiÃ³n con partidos competitivos."
+      "longDescription": "El vóley en Jaguares apunta a la formación completa del deportista. Desde técnicas individuales hasta juego en equipo, nuestras clases combinan precisión con partidos competitivos."
     },
     {
       "id": 4,
       "slug": "funcional-mixto",
       "fecha": "Horarios Flexibles",
       "imagen": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=800&q=80",
-      "titulo": "Funcional Mixto - Supera tus lÃ­mites",
+      "titulo": "Funcional Mixto - Supera tus límites",
       "gallery": [
         "https://images.unsplash.com/photo-1534258936925-c58bed479fcb?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=500&q=80&fit=crop",
@@ -318,36 +318,36 @@
       "heroImage": "/assets/glow/hero-funcional.jpg",
       "categories": [
         {
-          "ages": "+16 aÃ±os",
+          "ages": "+16 años",
           "name": "Nivel 1 - Principiantes",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 7:00 - 8:00"
+            "Lunes, Miércoles y Viernes 7:00 - 8:00"
           ]
         },
         {
-          "ages": "+16 aÃ±os",
+          "ages": "+16 años",
           "name": "Nivel 2 - Intermedio",
           "schedule": [
-            "Martes, Jueves y SÃ¡bado 8:00 - 9:00"
+            "Martes, Jueves y Sábado 8:00 - 9:00"
           ]
         },
         {
-          "ages": "+16 aÃ±os",
+          "ages": "+16 años",
           "name": "Nivel 3 - Avanzado",
           "schedule": [
             "Lunes a Viernes 19:00 - 20:00"
           ]
         }
       ],
-      "descripcion": "Sesiones que combinan fuerza, resistencia y agilidad para transformar tu condiciÃ³n fÃ­sica.",
-      "longDescription": "El entrenamiento funcional mixto combina fuerza, cardio, movilidad y coordinaciÃ³n. Es ideal para mejorar la condiciÃ³n fÃ­sica general en sesiones dinÃ¡micas."
+      "descripcion": "Sesiones que combinan fuerza, resistencia y agilidad para transformar tu condición física.",
+      "longDescription": "El entrenamiento funcional mixto combina fuerza, cardio, movilidad y coordinación. Es ideal para mejorar la condición física general en sesiones dinámicas."
     },
     {
       "id": 5,
       "slug": "mamas-fit",
-      "fecha": "MiÃ©rcoles y Viernes",
+      "fecha": "Miércoles y Viernes",
       "imagen": "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=800&q=80",
-      "titulo": "MamÃ¡s Fit - Bienestar y energÃ­a",
+      "titulo": "Mamás Fit - Bienestar y energía",
       "gallery": [
         "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1518611012118-696072aa579a?w=500&q=80&fit=crop",
@@ -361,9 +361,9 @@
       "categories": [
         {
           "ages": "Todas las edades",
-          "name": "Turno MaÃ±ana",
+          "name": "Turno Mañana",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 9:00 - 10:00"
+            "Lunes, Miércoles y Viernes 9:00 - 10:00"
           ]
         },
         {
@@ -374,15 +374,15 @@
           ]
         }
       ],
-      "descripcion": "Rutinas diseÃ±adas para mamÃ¡s activas que buscan mantenerse en forma, ganar energÃ­a y disfrutar del movimiento.",
-      "longDescription": "MamÃ¡s Fit es un espacio diseÃ±ado para madres que quieren mantenerse activas. Las clases combinan funcional, cardio y elongaciÃ³n en un entorno motivador."
+      "descripcion": "Rutinas diseñadas para mamás activas que buscan mantenerse en forma, ganar energía y disfrutar del movimiento.",
+      "longDescription": "Mamás Fit es un espacio diseñado para madres que quieren mantenerse activas. Las clases combinan funcional, cardio y elongación en un entorno motivador."
     },
     {
       "id": 6,
       "slug": "futbol-femenino",
-      "fecha": "Lunes, MiÃ©rcoles y Viernes",
+      "fecha": "Lunes, Miércoles y Viernes",
       "imagen": "https://images.unsplash.com/photo-1607962837359-5e7e89f86776?auto=format&fit=crop&w=800&q=80",
-      "titulo": "FÃºtbol Femenino - El talento no tiene gÃ©nero",
+      "titulo": "Fútbol Femenino - El talento no tiene género",
       "gallery": [
         "https://images.unsplash.com/photo-1607962837359-5e7e89f86776?w=700&q=80&fit=crop",
         "https://images.unsplash.com/photo-1541771519-7fdb2fc6ad44?w=500&q=80&fit=crop",
@@ -395,29 +395,29 @@
       "heroImage": "/assets/glow/hero-futfem.jpg",
       "categories": [
         {
-          "ages": "8 a 12 aÃ±os",
+          "ages": "8 a 12 años",
           "name": "Infantil",
           "schedule": [
             "Martes y Jueves 16:00 - 17:30"
           ]
         },
         {
-          "ages": "13 a 17 aÃ±os",
+          "ages": "13 a 17 años",
           "name": "Juvenil",
           "schedule": [
-            "Lunes, MiÃ©rcoles y Viernes 17:30 - 19:00"
+            "Lunes, Miércoles y Viernes 17:30 - 19:00"
           ]
         },
         {
-          "ages": "+18 aÃ±os",
+          "ages": "+18 años",
           "name": "Mayor",
           "schedule": [
-            "Martes, Jueves y SÃ¡bado 19:00 - 20:30"
+            "Martes, Jueves y Sábado 19:00 - 20:30"
           ]
         }
       ],
-      "descripcion": "Programa exclusivo para desarrollar futbolistas de Ã©lite con pasiÃ³n, tÃ©cnica y determinaciÃ³n.",
-      "longDescription": "El fÃºtbol femenino en Jaguares da espacio de crecimiento a jugadoras de la regiÃ³n. Formamos equipos competitivos con metodologÃ­a profesional y valores de equipo."
+      "descripcion": "Programa exclusivo para desarrollar futbolistas de élite con pasión, técnica y determinación.",
+      "longDescription": "El fútbol femenino en Jaguares da espacio de crecimiento a jugadoras de la región. Formamos equipos competitivos con metodología profesional y valores de equipo."
     }
   ],
   "docentes": [
@@ -425,13 +425,13 @@
       "id": 1,
       "foto": "/assets/Leonardo - Profesores Jaguares 2026-2.jpg.jpeg",
       "nombre": "Leonardo",
-      "especialidad": "FÃºtbol"
+      "especialidad": "Fútbol"
     },
     {
       "id": 2,
       "foto": "/assets/Oscar - Profesores Jaguares 2026-3.jpg.jpeg",
       "nombre": "Oscar",
-      "especialidad": "FÃºtbol"
+      "especialidad": "Fútbol"
     },
     {
       "id": 3,
@@ -443,21 +443,21 @@
       "id": 4,
       "foto": "/assets/Rafael - Profesores Jaguares 2026.jpg.jpeg",
       "nombre": "Rafael",
-      "especialidad": "VÃ³ley"
+      "especialidad": "Vóley"
     }
   ],
   "galeria": {
     "items": [
       {
-        "alt": "Entrenamiento de fÃºtbol",
+        "alt": "Entrenamiento de fútbol",
         "imagen": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800"
       },
       {
-        "alt": "NiÃ±os jugando fÃºtbol",
+        "alt": "Niños jugando fútbol",
         "imagen": "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800"
       },
       {
-        "alt": "Equipo de fÃºtbol",
+        "alt": "Equipo de fútbol",
         "imagen": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800"
       },
       {
@@ -465,15 +465,15 @@
         "imagen": "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=800"
       },
       {
-        "alt": "Partido de fÃºtbol",
+        "alt": "Partido de fútbol",
         "imagen": "https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800"
       },
       {
-        "alt": "NiÃ±os celebrando",
+        "alt": "Niños celebrando",
         "imagen": "https://images.unsplash.com/photo-1526232761682-d26e03ac148e?w=800"
       }
     ],
-    "botonTexto": "SÃ­guenos en Facebook",
+    "botonTexto": "Síguenos en Facebook",
     "botonEnlace": "#"
   },
   "estadisticas": {
@@ -498,7 +498,7 @@
   },
   "general": {
     "nombreClub": "JAGUARES",
-    "copyright": "Â© 2026 Jaguares F.C.",
+    "copyright": "© 2026 Jaguares F.C.",
     "instagram": "#",
     "facebook": "https://www.facebook.com/Jaguarezdegalvez",
     "whatsapp": "https://wa.me/51973324460",
@@ -506,17 +506,46 @@
     "facebookTexto": "Facebook",
     "whatsappTexto": "WhatsApp"
   },
+  "pagos": {
+    "plin": {
+      "numero": "+51923472307",
+      "destinatario": "Oscar Orosco",
+      "qr_url": "/assets/uploads/landing-1777504694288-uq54f.jpeg"
+    },
+    "yape": {
+      "numero": "+51923472307",
+      "alias": "Oscar Orosco"
+    },
+    "transferencias": [
+      {
+        "codigo": "BBVA",
+        "nombre": "BBVA",
+        "cuenta": "001108140277791167",
+        "cci": "01181400027779116714",
+        "titular": "Oscar Orosco",
+        "logo": "assets/logo-bbva.jpg"
+      },
+      {
+        "codigo": "BCP",
+        "nombre": "BCP",
+        "cuenta": "19407824258089",
+        "cci": "00219410782425808997",
+        "titular": "Oscar Orosco Aldonate",
+        "logo": "assets/logo-bcp.jpg"
+      }
+    ]
+  },
   "partidos": [
     {
       "id": 1,
-      "liga": "primera divisiÃ³n",
+      "liga": "primera división",
       "sede": "bentleigh",
       "fecha": "25 de agosto de 2024",
       "season": "2023",
       "resultado": "8:00 pm",
       "equipoLocal": {
         "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2023/09/team1-copyright.png",
-        "nombre": "Club de fÃƒÂºtbol"
+        "nombre": "Club de fútbol"
       },
       "equipoVisita": {
         "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team2-copyright.png",
@@ -525,7 +554,7 @@
     },
     {
       "id": 2,
-      "liga": "primera divisiÃ³n",
+      "liga": "primera división",
       "sede": "Kensington",
       "fecha": "28 de septiembre de 2024",
       "season": "2023",
@@ -541,7 +570,7 @@
     },
     {
       "id": 3,
-      "liga": "primera divisiÃ³n",
+      "liga": "primera división",
       "sede": "Nueva York",
       "fecha": "18 de julio de 2024",
       "season": "2023",
@@ -557,14 +586,14 @@
     },
     {
       "id": 4,
-      "liga": "primera divisiÃ³n",
+      "liga": "primera división",
       "sede": "bentleigh",
       "fecha": "26 de octubre de 2024",
       "season": "2023",
       "resultado": "11:40 am",
       "equipoLocal": {
         "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2023/09/team1-copyright.png",
-        "nombre": "Club de fÃƒÂºtbol"
+        "nombre": "Club de fútbol"
       },
       "equipoVisita": {
         "logo": "/assets/soccerclub.axiomthemes.com/wp-content/uploads/2024/12/team7-copyright.png",
@@ -580,7 +609,7 @@
         "fecha": "15 de febrero de 2026",
         "enlace": "/inscripcion",
         "imagen": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=890&h=664&q=80",
-        "titulo": "Â¡Inscripciones abiertas para el perÃ­odo 2026!",
+        "titulo": "¡Inscripciones abiertas para el período 2026!",
         "categoria": "Inscripciones",
         "comentarios": "24",
         "titulo_href": "/inscripcion",
@@ -592,7 +621,7 @@
         "fecha": "10 de febrero de 2026",
         "enlace": "#",
         "imagen": "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?auto=format&fit=crop&w=890&h=664&q=80",
-        "titulo": "CategorÃ­a Sub-12 clasifica al Campeonato Regional",
+        "titulo": "Categoría Sub-12 clasifica al Campeonato Regional",
         "categoria": "Torneos",
         "comentarios": "18",
         "titulo_href": "#",
@@ -623,7 +652,7 @@
         "categoria_href": "#"
       }
     ],
-    "titulo": "Ãšltimas Novedades",
+    "titulo": "Últimas Novedades",
     "subtitulo": "Academia Jaguares"
   },
   "tipografia": {
@@ -682,9 +711,9 @@
     }
   ],
   "_meta": {
-    "ultimaActualizacion": "2026-09-01T23:56:33.509Z",
+    "ultimaActualizacion": "2026-09-05T04:49:53.766Z",
     "actualizadoPor": "administrador",
-    "versionId": 10,
-    "versionLabel": "Publicación · 1/9/2026 06:56 p. m."
+    "versionId": 13,
+    "versionLabel": "Publicación · 4/9/2026 11:49 p. m."
   }
 }

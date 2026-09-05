@@ -1,4 +1,4 @@
-export const DEFAULT_LANDING_STRUCTURE = [
+﻿export const DEFAULT_LANDING_STRUCTURE = [
   { section_slug: 'hero',         orden: 10, visible: 1, label: 'Portada / Carrusel' },
   { section_slug: 'deportes',     orden: 20, visible: 1, label: 'Deportes' },
   { section_slug: 'ranking',      orden: 30, visible: 1, label: 'Ranking' },
@@ -88,6 +88,20 @@ export function normalizeLandingContent(content) {
   normalized.deportes = Array.isArray(source.deportes) ? source.deportes : [];
   normalized.docentes = Array.isArray(source.docentes) ? source.docentes : [];
   normalized.galeria.items = Array.isArray(source.galeria?.items) ? source.galeria.items : [];
+
+  // CRÍTICO: preservar siempre la sección pagos (plin, yape, transferencias)
+  // El CMS de landing NO debe tocar esta sección — se gestiona desde /admin-payment-config
+  if (source.pagos && typeof source.pagos === 'object') {
+    normalized.pagos = source.pagos;
+  } else if (!normalized.pagos) {
+    // Estructura vacía de fallback para no romper AdminPaymentConfig
+    normalized.pagos = {
+      plin: { numero: '', destinatario: '', qr_url: '' },
+      yape: { numero: '', alias: '' },
+      transferencias: []
+    };
+  }
+
   return normalized;
 }
 
