@@ -60,7 +60,7 @@ export const rateLimiterInscripciones = rateLimit({
  */
 export const rateLimiterLogin = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5, // máximo 5 intentos
+    max: 20, // máximo 20 intentos
     message: {
         success: false,
         error: 'Demasiados intentos de login',
