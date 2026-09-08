@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import fs from 'fs';
@@ -6429,7 +6429,7 @@ const LANDING_CONTENT_PATH = path.join(__dirname, 'landing-content.json');
 const UPLOADS_DIR = path.resolve(process.env.CMS_UPLOADS_DIR || path.join(__dirname, 'uploads', 'landing'));
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-app.use('/uploads/landing', express.static(UPLOADS_DIR, {
+app.use('/uploads/landing', (_req, res, next) => { res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); next(); }, express.static(UPLOADS_DIR, {
   fallthrough: false,
   immutable: true,
   maxAge: '30d',
