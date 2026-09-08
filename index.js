@@ -1193,7 +1193,8 @@ app.post('/api/eliminar-horario', async (req, res) => {
     // 4b. Actualizar monto en pagos_mensuales pendientes del mes actual
     try {
       const ahora = new Date();
-      const mesActual = ahora.toLocaleString('es-PE', { month: 'long' }).split(' ')[0];
+      const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const mesActual = NOMBRES_MESES_NORM[ahora.getMonth()]; // siempre en minusculas y ortografia estandar
       const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
       if (alumnoRows.length > 0) {
         const [updated] = await db.query(
@@ -1361,7 +1362,8 @@ app.post('/api/agregar-horario', async (req, res) => {
     // 5b. Actualizar monto en pagos_mensuales pendientes del mes actual
     try {
       const ahora = new Date();
-      const mesActual = ahora.toLocaleString('es-PE', { month: 'long' }).split(' ')[0];
+      const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const mesActual = NOMBRES_MESES_NORM[ahora.getMonth()]; // siempre en minusculas y ortografia estandar
       const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
       if (alumnoRows.length > 0) {
         const [updated] = await db.query(
@@ -2193,7 +2195,12 @@ app.post('/api/pago-mensual', async (req, res) => {
     
     // Extraer mes y año del string (formato: "enero-2026" o "enero de 2026")
     const fechaActual = new Date();
-    const mesNombre = mes.split(/[-\s]/)[0]; // "enero"
+    // Normalizar mes: Linux puede devolver 'setiembre' sin 'p' via toLocaleString
+    const MAPA_MESES = { 'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,'julio':7,'agosto':8,'setiembre':9,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12 };
+    const NOMBRES_MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mesRaw = mes.split(/[-\s]/)[0].toLowerCase();
+    const mesIdx = MAPA_MESES[mesRaw];
+    const mesNombre = mesIdx ? NOMBRES_MESES[mesIdx - 1] : mesRaw; // siempre 'septiembre'
     const anioActual = fechaActual.getFullYear();
     
     // Registrar en MySQL el pago mensual
@@ -2286,8 +2293,11 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       params.push(estado);
     }
     if (mes) {
-      query += ' AND pm.mes = ?';
-      params.push(mes);
+      // Normalizar filtro: 'setiembre' y 'Septiembre' -> 'septiembre'
+      const MAPA_MESES_FILTRO = { 'setiembre': 'septiembre' };
+      const mesFiltro = (MAPA_MESES_FILTRO[mes.toLowerCase()] || mes.toLowerCase());
+      query += ' AND LOWER(pm.mes) = ?';
+      params.push(mesFiltro);
     }
     if (anio) {
       // Se filtra por año en JS después de la consulta
@@ -9881,6 +9891,8 @@ app.use(notFoundHandler);
 
 // Manejador global de errores
 app.use(errorHandler);
+
+
 
 
 
