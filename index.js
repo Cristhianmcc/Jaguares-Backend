@@ -6440,7 +6440,11 @@ const IMAGE_MIME_EXTENSIONS = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
-  'image/gif': '.gif'
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
+  'video/ogg': '.ogv'
 };
 
 const getMediaUrl = (req, filename) => {
@@ -6470,10 +6474,10 @@ const imageStorage = multer.diskStorage({
 });
 const imageUpload = multer({
   storage: imageStorage,
-  limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB
+  limits: { fileSize: 60 * 1024 * 1024 }, // 60 MB (permite videos)
   fileFilter: (_req, file, cb) => {
     if (!IMAGE_MIME_EXTENSIONS[file.mimetype]) {
-      return cb(new Error('Formato no permitido. Usa JPG, PNG, WebP o GIF.'));
+      return cb(new Error('Formato no permitido. Usa JPG, PNG, WebP, GIF, MP4, WebM o MOV.'));
     }
     cb(null, true);
   }
@@ -7349,8 +7353,170 @@ app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async
 // ==============================================================
 
 // Iniciar servidor
-const server = app.listen(PORT, () => {
-  console.log('');
+/**
+ * POST /api/admin/inscripciones/:inscripcionId/override-horario
+ * OVERRIDE ADMIN: Agregar un horario a una inscripcion saltando las validaciones de plan/categoria.
+ * Permite al admin asignar horarios de diferente plan o categoria al mismo alumno
+ * (ej: alumno Premium que tambien entrena con grupo Estandar).
+ * El precio NO se recalcula: el admin lo gestiona manualmente en pagos mensuales.
+ * Protegido: solo administradores autenticados.
+ */
+app.post('/api/admin/inscripciones/:inscripcionId/override-horario', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { inscripcionId } = req.params;
+    const { horario_id } = req.body;
+
+    if (!horario_id) {
+      return res.status(400).json({ success: false, error: 'Se requiere horario_id en el body' });
+    }
+
+    if (!db) {
+      return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+    }
+
+    // 1. Verificar que la inscripcion existe y obtener datos para el log
+    const [inscRows] = await db.query(`
+      SELECT i.inscripcion_id, i.deporte_id, i.plan, i.estado,
+             d.nombre as deporte, a.dni, a.nombres
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      WHERE i.inscripcion_id = ?
+    `, [inscripcionId]);
+
+    if (inscRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripcion no encontrada' });
+    }
+
+    const inscripcion = inscRows[0];
+
+    // 2. Verificar que el horario existe y pertenece al MISMO deporte (unica restriccion que se mantiene)
+    const [horRows] = await db.query(`
+      SELECT horario_id, dia, plan, categoria,
+             TIME_FORMAT(hora_inicio, '%H:%i') as hora_inicio,
+             TIME_FORMAT(hora_fin, '%H:%i') as hora_fin
+      FROM horarios
+      WHERE horario_id = ? AND deporte_id = ? AND estado = 'activo'
+    `, [horario_id, inscripcion.deporte_id]);
+
+    if (horRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El horario no existe, no pertenece al mismo deporte, o no esta activo'
+      });
+    }
+
+    const horario = horRows[0];
+
+    // 3. Verificar que el alumno NO este ya asignado a ese horario en esta inscripcion
+    const [existRows] = await db.query(`
+      SELECT 1 FROM inscripcion_horarios
+      WHERE inscripcion_id = ? AND horario_id = ?
+    `, [inscripcionId, horario_id]);
+
+    if (existRows.length > 0) {
+      return res.status(409).json({ success: false, error: 'El alumno ya esta asignado a ese horario en esta inscripcion' });
+    }
+
+    // 4. Insertar el horario (SIN validar plan ni categoria - ese es el override)
+    await db.query(`
+      INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)
+    `, [inscripcionId, horario_id]);
+
+    // 5. Invalidar cache del alumno
+    if (typeof invalidateDNICache === 'function') {
+      invalidateDNICache(inscripcion.dni);
+    }
+
+    console.log(`⚡ OVERRIDE ADMIN: horario ${horario_id} (${horario.dia} ${horario.hora_inicio} - Plan ${horario.plan}, Cat ${horario.categoria}) agregado a inscripcion ${inscripcionId} (${inscripcion.deporte}) del alumno DNI ${inscripcion.dni} - ${inscripcion.nombres}`);
+
+    res.json({
+      success: true,
+      mensaje: `Horario del ${horario.dia} ${horario.hora_inicio} agregado correctamente como acceso especial`,
+      horario: {
+        horario_id: horario.horario_id,
+        dia: horario.dia,
+        hora_inicio: horario.hora_inicio,
+        hora_fin: horario.hora_fin,
+        plan: horario.plan,
+        categoria: horario.categoria
+      },
+      aviso: 'El precio mensual NO se actualizo automaticamente. Ajustalo manualmente en Pagos Mensuales si es necesario.'
+    });
+
+  } catch (error) {
+    console.error('❌ Error en override-horario admin:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/admin/inscripciones/:inscripcionId/override-horario/:horarioId
+ * Quitar un horario de acceso especial de una inscripcion (admin override).
+ */
+app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { inscripcionId, horarioId } = req.params;
+
+    if (!db) {
+      return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+    }
+
+    // Obtener datos para el log y validacion
+    const [rows] = await db.query(`
+      SELECT i.inscripcion_id, a.dni, a.nombres, d.nombre as deporte
+      FROM inscripciones i
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE i.inscripcion_id = ?
+    `, [inscripcionId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripcion no encontrada' });
+    }
+
+    // Verificar que el horario esta asignado
+    const [existRows] = await db.query(`
+      SELECT 1 FROM inscripcion_horarios WHERE inscripcion_id = ? AND horario_id = ?
+    `, [inscripcionId, horarioId]);
+
+    if (existRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'El horario no esta asignado a esta inscripcion' });
+    }
+
+    // Verificar que quede al menos 1 horario
+    const [totalRows] = await db.query(`
+      SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?
+    `, [inscripcionId]);
+
+    if (totalRows[0].total <= 1) {
+      return res.status(400).json({ success: false, error: 'No se puede quitar el unico horario de la inscripcion. Si quieres cancelar la inscripcion, usa la opcion correspondiente.' });
+    }
+
+    await db.query(`
+      DELETE FROM inscripcion_horarios WHERE inscripcion_id = ? AND horario_id = ?
+    `, [inscripcionId, horarioId]);
+
+    const alumno = rows[0];
+    if (typeof invalidateDNICache === 'function') {
+      invalidateDNICache(alumno.dni);
+    }
+
+    console.log(`🗑️ OVERRIDE ADMIN (baja): horario ${horarioId} quitado de inscripcion ${inscripcionId} (${alumno.deporte}) del alumno DNI ${alumno.dni}`);
+
+    res.json({
+      success: true,
+      mensaje: 'Horario de acceso especial eliminado correctamente'
+    });
+
+  } catch (error) {
+    console.error('❌ Error al quitar override-horario admin:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+const server = app.listen(PORT, () => {  console.log('');
   console.log('='.repeat(70));
   console.log('🚀 SERVIDOR BACKEND JAGUARES - MODO PRODUCCIÓN');
   console.log('='.repeat(70));
