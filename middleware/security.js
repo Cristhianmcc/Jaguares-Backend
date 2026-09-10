@@ -121,8 +121,9 @@ export const corsOptions = {
             'https://www.jaguarescar.com'
         ];
 
-        // Permitir requests sin origin (como Postman, curl, apps móviles)
-        if (!origin || whitelist.indexOf(origin) !== -1) {
+        // Permitir requests sin origin (apps móviles nativas) o cualquier localhost/127.0.0.1 (flutter web)
+        const isLocalDev = origin && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        if (!origin || whitelist.indexOf(origin) !== -1 || isLocalDev) {
             callback(null, true);
         } else {
             console.warn(`🚫 CORS bloqueó origin: ${origin}`);
