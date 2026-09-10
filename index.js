@@ -9216,6 +9216,7 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
         d.deporte_id,
         d.nombre as deporte,
         d.icono,
+        h.horario_id,
         h.dia,
         TIME_FORMAT(h.hora_inicio, '%H:%i') as hora_inicio,
         TIME_FORMAT(h.hora_fin, '%H:%i') as hora_fin,
@@ -9250,6 +9251,7 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       }
       if (row.dia && row.hora_inicio) {
         inscripcionesMap.get(key).horarios.push({
+          horario_id: row.horario_id,
           dia: row.dia,
           hora_inicio: row.hora_inicio,
           hora_fin: row.hora_fin
@@ -9264,6 +9266,7 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
         inscripcion.horarios.forEach(horario => {
           inscripciones.push({
             ...inscripcion,
+            horario_id: horario.horario_id,
             dia: horario.dia,
             hora_inicio: horario.hora_inicio,
             hora_fin: horario.hora_fin
