@@ -112,6 +112,43 @@ async function initDatabase() {
       console.warn('   Se usar\u00e1 el nombre de columna por defecto:', global.COL_ANIO);
     }
     
+
+    // Agregar columnas para asistencia de puerta si no existen
+    try {
+      const [asistCols] = await connection.query('SHOW COLUMNS FROM asistencias');
+      if (!asistCols.find(c => c.Field === 'asistencia_puerta')) {
+        await connection.query('ALTER TABLE asistencias ADD COLUMN asistencia_puerta TINYINT(1) DEFAULT 0');
+        console.log('✅ Columna asistencia_puerta agregada a asistencias');
+      }
+      if (!asistCols.find(c => c.Field === 'hora_puerta')) {
+        await connection.query('ALTER TABLE asistencias ADD COLUMN hora_puerta TIME NULL');
+        console.log('✅ Columna hora_puerta agregada a asistencias');
+      }
+    } catch (errAsist) {
+      console.warn('⚠️ Error al verificar columnas en asistencias:', errAsist.message);
+    }
+
+    // Crear tabla de logs accesos_puerta si no existe
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS accesos_puerta (
+          acceso_id INT AUTO_INCREMENT PRIMARY KEY,
+          alumno_id INT NOT NULL,
+          horario_id INT NULL,
+          fecha DATE NOT NULL,
+          hora TIME NOT NULL,
+          estado_membresia VARCHAR(50) DEFAULT 'activa',
+          autorizado_manual TINYINT(1) DEFAULT 0,
+          registrado_por INT NULL,
+          observaciones TEXT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_alumno_fecha (alumno_id, fecha)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+    } catch (errAcc) {
+      console.warn('⚠️ Error al verificar tabla accesos_puerta:', errAcc.message);
+    }
+
     connection.release();
   } catch (error) {
     console.error('❌ Error al conectar con MySQL:', error);
@@ -3070,7 +3107,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           INNER JOIN deportes d ON i.deporte_id = d.deporte_id
           LEFT JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
           LEFT JOIN horarios h ON ih.horario_id = h.horario_id
-          WHERE 1=1
+          WHERE i.estado != 'cancelada'
         `;
         
         const params = [];
@@ -4614,7 +4651,9 @@ app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async 
                 a.dni,
                 ih.horario_id AS alumno_horario_id,
                 CASE WHEN ast.asistencia_id IS NOT NULL THEN 1 ELSE 0 END AS asistencia_registrada,
-                COALESCE(ast.presente, 1) AS presente
+                COALESCE(ast.presente, 1) AS presente,
+                COALESCE(ast.asistencia_puerta, 0) AS asistencia_puerta,
+                TIME_FORMAT(ast.hora_puerta, '%H:%i') AS hora_puerta
             FROM inscripciones i
             JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
             JOIN alumnos a ON a.alumno_id = i.alumno_id
@@ -7484,20 +7523,86 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
       return res.status(404).json({ success: false, error: 'El horario no esta asignado a esta inscripcion' });
     }
 
-    // Verificar que quede al menos 1 horario
+    // Verificar cuantos horarios quedan
     const [totalRows] = await db.query(`
       SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?
     `, [inscripcionId]);
 
-    if (totalRows[0].total <= 1) {
-      return res.status(400).json({ success: false, error: 'No se puede quitar el unico horario de la inscripcion. Si quieres cancelar la inscripcion, usa la opcion correspondiente.' });
+    const alumno = rows[0];
+    const esUltimo = totalRows[0].total <= 1;
+
+    if (esUltimo) {
+      // --- Cancelar inscripcion completa (es el ultimo horario) ---
+      // 1. Cancelar la inscripcion
+      await db.query(
+        `UPDATE inscripciones SET estado = 'cancelada' WHERE inscripcion_id = ? AND alumno_id IN (SELECT alumno_id FROM alumnos WHERE dni = ?)`,
+        [inscripcionId, alumno.dni]
+      );
+
+      // 2. Si no quedan otras inscripciones activas/pendientes, marcar alumno inactivo
+      const [alumnoRow] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [alumno.dni]);
+      if (alumnoRow.length > 0) {
+        const alumnoId = alumnoRow[0].alumno_id;
+        const [restantes] = await db.query(
+          `SELECT COUNT(*) as total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+          [alumnoId]
+        );
+        if (restantes[0].total === 0) {
+          await db.query(`UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?`, [alumnoId]);
+          console.log(`🔴 Alumno ${alumno.dni} marcado inactivo (sin inscripciones activas tras cancelar inscripcion ${inscripcionId})`);
+        }
+
+        // 3. Recalcular monto total en pagos_mensuales pendientes del mes actual
+        //    sumando precio_mensual de las inscripciones que siguen activas
+        try {
+          const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+          const mesActual = NOMBRES_MESES_NORM[new Date().getMonth()];
+          const [activasRows] = await db.query(
+            `SELECT COALESCE(SUM(precio_mensual), 0) as total_mensual
+             FROM inscripciones
+             WHERE alumno_id = ? AND estado IN ('activa', 'pendiente') AND inscripcion_id != ?`,
+            [alumnoId, inscripcionId]
+          );
+          const nuevoMontoTotal = parseFloat(activasRows[0].total_mensual) || 0;
+          if (nuevoMontoTotal > 0) {
+            const [updPm] = await db.query(
+              `UPDATE pagos_mensuales SET monto = ? WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'`,
+              [nuevoMontoTotal, alumnoId, mesActual]
+            );
+            if (updPm.affectedRows > 0) {
+              console.log(`💰 pagos_mensuales actualizado a S/.${nuevoMontoTotal} para DNI ${alumno.dni} mes ${mesActual} (inscripcion ${inscripcionId} cancelada)`);
+            }
+          } else {
+            // Sin inscripciones activas → monto 0, marcar pendiente como cancelado si aplica
+            await db.query(
+              `UPDATE pagos_mensuales SET monto = 0 WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'`,
+              [alumnoId, mesActual]
+            );
+            console.log(`💰 pagos_mensuales puesto a 0 para DNI ${alumno.dni} mes ${mesActual} (sin inscripciones activas)`);
+          }
+        } catch (ePm) {
+          console.error('⚠️ Error al recalcular pagos_mensuales tras cancelar inscripcion:', ePm.message);
+        }
+      }
+
+      if (typeof invalidateDNICache === 'function') invalidateDNICache(alumno.dni);
+      const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+      cache.del(inscritosKeys);
+
+      console.log(`🗑️ OVERRIDE ADMIN (cancelacion): inscripcion ${inscripcionId} (${alumno.deporte}) cancelada para DNI ${alumno.dni} (ultimo horario eliminado)`);
+
+      return res.json({
+        success: true,
+        inscripcion_cancelada: true,
+        mensaje: `La inscripción de ${alumno.deporte} fue cancelada correctamente (era el único horario)`
+      });
     }
 
+    // --- Caso normal: quedan más horarios, solo quitar este ---
     await db.query(`
       DELETE FROM inscripcion_horarios WHERE inscripcion_id = ? AND horario_id = ?
     `, [inscripcionId, horarioId]);
 
-    const alumno = rows[0];
     if (typeof invalidateDNICache === 'function') {
       invalidateDNICache(alumno.dni);
     }
@@ -7506,6 +7611,7 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
 
     res.json({
       success: true,
+      inscripcion_cancelada: false,
       mensaje: 'Horario de acceso especial eliminado correctamente'
     });
 
@@ -8580,20 +8686,284 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
   }
 });
 
-// GET /api/admin/alumnos/:dni/asistencias — historial de asistencias de un alumno
+
+// ==================== CONTROL DE PUERTA / CARNETS ====================
+
+// POST /api/admin/carnets/validar-acceso
+// Valida carnet en puerta, evalúa regla de pago mensual (días 1-5 vs 6+) y registra asistencia de puerta
+const handlerValidarAccesoPuerta = async (req, res) => {
+  try {
+    const admin = req.admin || null;
+    const adminId = admin ? admin.admin_id : null;
+    let { dni, forzar_ingreso } = req.body;
+
+    if (!dni) {
+      return res.status(400).json({ success: false, error: 'DNI requerido' });
+    }
+
+    // Normalizar DNI
+    if (dni.includes('dni=')) {
+      const match = dni.match(/dni=([a-zA-Z0-9_-]+)/);
+      if (match) dni = match[1];
+    } else if (dni.includes('/')) {
+      const parts = dni.split('/');
+      dni = parts[parts.length - 1];
+    }
+    dni = dni.replace(/[^0-9a-zA-Z]/g, '').trim();
+
+    // 1. Buscar alumno en MySQL
+    const [alumnosRows] = await db.query(`
+      SELECT 
+        a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
+        a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado
+      FROM alumnos a
+      WHERE a.dni = ?
+      LIMIT 1
+    `, [dni]);
+
+    if (alumnosRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Alumno no encontrado en el sistema con el DNI: ' + dni
+      });
+    }
+
+    const alumno = alumnosRows[0];
+    const nombreCompleto = `${alumno.nombres || ''} ${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim();
+
+    // 2. Obtener inscripciones y horarios del alumno
+    const [inscripciones] = await db.query(`
+      SELECT 
+        i.inscripcion_id, i.plan, i.precio_mensual, i.estado,
+        d.nombre AS deporte, d.deporte_id,
+        h.horario_id, h.dia, h.hora_inicio, h.hora_fin, h.categoria
+      FROM inscripciones i
+      JOIN deportes d ON d.deporte_id = i.deporte_id
+      LEFT JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
+      LEFT JOIN horarios h ON h.horario_id = ih.horario_id
+      WHERE i.alumno_id = ? AND i.estado = 'activa'
+    `, [alumno.alumno_id]);
+
+    if (inscripciones.length === 0) {
+      return res.json({
+        success: true,
+        activo: false,
+        sin_clase_hoy: false,
+        aviso: 'MEMBRESÍA INACTIVA - No ha pagado mensualidad',
+        motivo: 'El alumno no tiene inscripciones activas',
+        puede_autorizar: !!admin,
+        alumno: {
+          alumno_id: alumno.alumno_id,
+          dni: alumno.dni,
+          nombres: alumno.nombres,
+          apellidos: `${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim(),
+          nombre_completo: nombreCompleto,
+          foto_carnet_url: alumno.foto_carnet_url,
+          fecha_nacimiento: alumno.fecha_nacimiento,
+          deporte: 'Sin inscripción',
+          plan: 'Inactivo'
+        },
+        horario_hoy: null
+      });
+    }
+
+    // 3. Fecha y hora local de Perú (UTC-5)
+    const ahoraUtc = Date.now();
+    const ahoraPeru = new Date(ahoraUtc - 5 * 3600 * 1000);
+    const diaMes = ahoraPeru.getUTCDate();
+    const fechaHoyStr = ahoraPeru.toISOString().split('T')[0];
+    const horaActualStr = ahoraPeru.toISOString().split('T')[1].substring(0, 5);
+
+    const NOMBRES_MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mesActual = NOMBRES_MESES[ahoraPeru.getUTCMonth()];
+    const anioActual = ahoraPeru.getUTCFullYear();
+
+    // 4. Validar si el alumno tiene clase el día de hoy
+    const DIAS_SEMANA_MAP = ['DOMINGO','LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO'];
+    const norm = s => (s || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const diaSemanaHoy = DIAS_SEMANA_MAP[ahoraPeru.getUTCDay()];
+
+    const horarioHoy = inscripciones.find(i => norm(i.dia) === diaSemanaHoy);
+    const diasInscritos = Array.from(new Set(inscripciones.map(i => i.dia).filter(Boolean)));
+
+    if (!horarioHoy && !forzar_ingreso) {
+      // El alumno NO tiene clase hoy
+      return res.json({
+        success: true,
+        activo: false,
+        sin_clase_hoy: true,
+        aviso: `SIN CLASE PROGRAMADA PARA HOY (${diaSemanaHoy})`,
+        motivo: `El alumno no tiene horario programado para hoy ${diaSemanaHoy}. Sus días de entrenamiento son: ${diasInscritos.join(', ')}.`,
+        pase_entregado: false,
+        asistencia_puerta_registrada: false,
+        hora_ingreso: horaActualStr,
+        puede_autorizar: !!admin,
+        alumno: {
+          alumno_id: alumno.alumno_id,
+          dni: alumno.dni,
+          nombres: alumno.nombres,
+          apellidos: `${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim(),
+          nombre_completo: nombreCompleto,
+          foto_carnet_url: alumno.foto_carnet_url,
+          fecha_nacimiento: alumno.fecha_nacimiento,
+          deporte: inscripciones[0]?.deporte || 'Fútbol',
+          plan: inscripciones[0]?.plan || 'Económico',
+          categoria: inscripciones[0]?.categoria || ''
+        },
+        horario_hoy: null,
+        dias_inscritos: diasInscritos
+      });
+    }
+
+    // Horario a asignar: el de hoy si existe, o el primero si fue forzado por administración
+    const horarioFinal = horarioHoy || inscripciones[0];
+    const horarioIdFinal = horarioFinal?.horario_id || null;
+
+    // 5. Evaluar Regla de Membresía (Día 1-5 vs Día 6+)
+    let activo = false;
+    let motivo = '';
+
+    if (diaMes >= 1 && diaMes <= 5) {
+      activo = true;
+      motivo = `Período regular de pago (Día ${diaMes} de 5 de ${mesActual})`;
+    } else {
+      const colAnio = global.COL_ANIO || 'anio';
+      const [pagosMes] = await db.query(`
+        SELECT pm.*
+        FROM pagos_mensuales pm
+        WHERE pm.alumno_id = ? 
+          AND LOWER(pm.mes) = ? 
+          AND pm.${colAnio} = ?
+          AND pm.estado = 'confirmado'
+        LIMIT 1
+      `, [alumno.alumno_id, mesActual.toLowerCase(), anioActual]);
+
+      if (pagosMes.length > 0) {
+        activo = true;
+        motivo = `Mensualidad de ${mesActual} ${anioActual} confirmada`;
+      } else {
+        const pagoConfirmado = alumno.estado_pago === 'confirmado' || alumno.estado_pago === 'pagado';
+        const [pagosPendientes] = await db.query(`
+          SELECT pm.pago_id FROM pagos_mensuales pm
+          WHERE pm.alumno_id = ? AND LOWER(pm.mes) = ? AND pm.${colAnio} = ? AND pm.estado IN ('pendiente', 'rechazado')
+          LIMIT 1
+        `, [alumno.alumno_id, mesActual.toLowerCase(), anioActual]);
+
+        if (pagoConfirmado && pagosPendientes.length === 0) {
+          activo = true;
+          motivo = `Membresía activa con pago confirmado`;
+        } else {
+          activo = false;
+          motivo = `Sin pago de mensualidad confirmado para ${mesActual} (Vencido desde el 6 de ${mesActual})`;
+        }
+      }
+    }
+
+    let asistenciaPuertaRegistrada = false;
+
+    // 6. Si está activo o el admin forzó el ingreso manualmente:
+    // NOTA DE SEGURIDAD: Solo registra asistencia en puerta si quien valida tiene sesión de admin/encargado
+    if (admin && (activo || forzar_ingreso)) {
+      if (horarioIdFinal) {
+        await db.query(`
+          INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, asistencia_puerta, hora_puerta, observaciones, registrado_por)
+          VALUES (?, ?, ?, 0, 1, CURTIME(), ?, ?)
+          ON DUPLICATE KEY UPDATE 
+            asistencia_puerta = 1,
+            hora_puerta = CURTIME(),
+            observaciones = VALUES(observaciones),
+            registrado_por = VALUES(registrado_por)
+        `, [
+          alumno.alumno_id,
+          horarioIdFinal,
+          fechaHoyStr,
+          forzar_ingreso ? 'Ingreso autorizado manualmente por administración' : 'Escaneo en puerta (Membresía activa)',
+          adminId
+        ]);
+        asistenciaPuertaRegistrada = true;
+
+        // Log en accesos_puerta
+        await db.query(`
+          INSERT INTO accesos_puerta (alumno_id, horario_id, fecha, hora, estado_membresia, autorizado_manual, registrado_por, observaciones)
+          VALUES (?, ?, ?, CURTIME(), ?, ?, ?, ?)
+        `, [
+          alumno.alumno_id,
+          horarioIdFinal,
+          fechaHoyStr,
+          activo ? 'activa' : 'autorizada_manual',
+          forzar_ingreso ? 1 : 0,
+          adminId,
+          forzar_ingreso ? 'Autorizado manualmente por administración' : motivo
+        ]);
+      }
+    }
+
+    const aviso = activo
+      ? 'MEMBRESÍA ACTIVA'
+      : (forzar_ingreso ? 'INGRESO AUTORIZADO POR ADMINISTRACIÓN' : 'MEMBRESÍA INACTIVA - No ha pagado mensualidad');
+
+    return res.json({
+      success: true,
+      activo: activo || !!forzar_ingreso,
+      sin_clase_hoy: false,
+      estado_original: activo ? 'activa' : 'inactiva',
+      aviso,
+      motivo,
+      pase_entregado: activo || !!forzar_ingreso,
+      asistencia_puerta_registrada: asistenciaPuertaRegistrada,
+      hora_ingreso: horaActualStr,
+      puede_autorizar: !activo && !forzar_ingreso && !!admin,
+      alumno: {
+        alumno_id: alumno.alumno_id,
+        dni: alumno.dni,
+        nombres: alumno.nombres,
+        apellidos: `${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim(),
+        nombre_completo: nombreCompleto,
+        foto_carnet_url: alumno.foto_carnet_url,
+        fecha_nacimiento: alumno.fecha_nacimiento,
+        deporte: horarioFinal?.deporte || inscripciones[0]?.deporte || 'Deportes Jaguares',
+        plan: horarioFinal?.plan || inscripciones[0]?.plan || 'Económico',
+        categoria: horarioFinal?.categoria || ''
+      },
+      horario_hoy: horarioFinal ? {
+        horario_id: horarioFinal.horario_id,
+        deporte: horarioFinal.deporte,
+        dia: horarioFinal.dia,
+        hora_inicio: horarioFinal.hora_inicio,
+        hora_fin: horarioFinal.hora_fin,
+        categoria: horarioFinal.categoria
+      } : null,
+      dias_inscritos: diasInscritos
+    });
+  } catch (err) {
+    console.error('Error en validar-acceso:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Error interno al validar acceso de carnet'
+    });
+  }
+};
+
+app.post('/api/admin/carnets/validar-acceso', verificarAutenticacion, handlerValidarAccesoPuerta);
+app.post('/api/carnets/validar-acceso', verificarAutenticacion, handlerValidarAccesoPuerta);
+
+// GET /api/admin/alumnos/:dni/asistencias — historial de asistencias de un alumno con doble asistencia (profesor y puerta)
 app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { dni } = req.params;
+    const { fecha_inicio, fecha_fin } = req.query;
     const [alumno] = await db.execute(
       'SELECT alumno_id, nombres, apellido_paterno, apellido_materno FROM alumnos WHERE dni = ?',
       [dni]
     );
     if (alumno.length === 0) return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
 
-    const [registros] = await db.execute(`
+    let sql = `
       SELECT
         ast.fecha,
         ast.presente,
+        COALESCE(ast.asistencia_puerta, 0) AS asistencia_puerta,
+        TIME_FORMAT(ast.hora_puerta, '%H:%i') AS hora_puerta,
         ast.observaciones,
         d.nombre AS deporte,
         h.dia,
@@ -8604,18 +8974,39 @@ app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificar
       JOIN horarios h ON ast.horario_id = h.horario_id
       JOIN deportes d ON h.deporte_id = d.deporte_id
       WHERE ast.alumno_id = ?
-      ORDER BY ast.fecha DESC, d.nombre
-      LIMIT 200
-    `, [alumno[0].alumno_id]);
+    `;
+    const params = [alumno[0].alumno_id];
+
+    if (fecha_inicio && fecha_fin) {
+      sql += ' AND ast.fecha BETWEEN ? AND ?';
+      params.push(fecha_inicio, fecha_fin);
+    } else if (fecha_inicio) {
+      sql += ' AND ast.fecha >= ?';
+      params.push(fecha_inicio);
+    } else if (fecha_fin) {
+      sql += ' AND ast.fecha <= ?';
+      params.push(fecha_fin);
+    }
+
+    sql += ' ORDER BY ast.fecha DESC, d.nombre LIMIT 300';
+
+    const [registros] = await db.execute(sql, params);
 
     const total = registros.length;
     const presentes = registros.filter(r => r.presente).length;
+    const puertaOk = registros.filter(r => r.asistencia_puerta === 1 || r.asistencia_puerta === true || r.asistencia_puerta === '1').length;
 
     res.json({
       success: true,
       alumno: { ...alumno[0], dni },
       asistencias: registros,
-      resumen: { total, presentes, ausentes: total - presentes }
+      resumen: {
+        total,
+        presentes,
+        ausentes: total - presentes,
+        puerta_ok: puertaOk,
+        sin_puerta: total - puertaOk
+      }
     });
   } catch (error) {
     console.error('Error al obtener asistencias de alumno:', error);

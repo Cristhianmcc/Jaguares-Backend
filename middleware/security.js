@@ -122,7 +122,8 @@ export const corsOptions = {
         ];
 
         // Permitir requests sin origin (apps móviles nativas) o cualquier localhost/127.0.0.1 (flutter web)
-        const isLocalDev = origin && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        // Permitir requests sin origin, localhost, 127.0.0.1 o IPs de red local (192.168.x, 10.x, 172.16-31.x)
+        const isLocalDev = origin && /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
         if (!origin || whitelist.indexOf(origin) !== -1 || isLocalDev) {
             callback(null, true);
         } else {
