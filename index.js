@@ -1246,6 +1246,8 @@ app.post('/api/eliminar-horario', async (req, res) => {
 
     // 5. Limpiar caché
     cache.del(getCacheKey('consultas', dni));
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    if (inscritosKeys.length > 0) cache.del(inscritosKeys);
     console.log(`🗑️ Horario ${horario_id} eliminado de inscripción ${inscripcion_id}. Días restantes: ${totalDias}. Precio: S/.${nuevoPrecio}`);
 
     res.json({
@@ -1541,6 +1543,154 @@ app.get('/api/validar-dni/:dni', async (req, res) => {
       valido: false,
       error: error.message || 'Error al validar DNI' 
     });
+  }
+});
+
+// Endpoint público para consultar datos de un alumno por DNI (autocompletado e inscripciones)
+app.get('/api/consultar/:dni', async (req, res) => {
+  try {
+    const { dni } = req.params;
+    if (!dni || dni.toString().trim().length < 6) {
+      return res.status(400).json({ success: false, error: 'DNI inválido' });
+    }
+
+    if (!db) {
+      return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+    }
+
+    const [alumnos] = await db.query(
+      `SELECT 
+        alumno_id,
+        dni,
+        nombres,
+        CONCAT(TRIM(apellido_paterno), IF(apellido_materno IS NOT NULL AND apellido_materno != '', CONCAT(' ', TRIM(apellido_materno)), '')) as apellidos,
+        apellido_paterno,
+        apellido_materno,
+        DATE_FORMAT(fecha_nacimiento, '%Y-%m-%d') as fecha_nacimiento,
+        TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) as edad,
+        sexo,
+        telefono,
+        email,
+        direccion,
+        seguro_tipo,
+        condicion_medica,
+        apoderado,
+        telefono_apoderado,
+        dni_frontal_url,
+        dni_reverso_url,
+        foto_carnet_url,
+        comprobante_pago_url,
+        estado,
+        estado_pago,
+        fecha_pago,
+        monto_pago,
+        numero_operacion,
+        notas_pago,
+        created_at,
+        updated_at
+      FROM alumnos WHERE dni = ? ORDER BY alumno_id DESC LIMIT 1`,
+      [dni.toString().trim()]
+    );
+
+    if (alumnos.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+
+    const usuario = alumnos[0];
+
+    // Consultar inscripciones
+    const [inscripcionesRaw] = await db.query(`
+      SELECT 
+        i.inscripcion_id,
+        i.estado as estado_inscripcion,
+        i.fecha_inscripcion,
+        i.plan,
+        i.precio_mensual as precio,
+        d.deporte_id,
+        d.nombre as deporte,
+        d.icono,
+        h.horario_id,
+        h.dia,
+        TIME_FORMAT(h.hora_inicio, '%H:%i') as hora_inicio,
+        TIME_FORMAT(h.hora_fin, '%H:%i') as hora_fin,
+        h.categoria,
+        h.nivel
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      LEFT JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
+      LEFT JOIN horarios h ON ih.horario_id = h.horario_id
+      WHERE i.alumno_id = ? AND i.estado IN ('activa', 'pendiente')
+      ORDER BY d.nombre, h.dia, h.hora_inicio
+    `, [usuario.alumno_id]);
+
+    const inscripcionesMap = new Map();
+    inscripcionesRaw.forEach(row => {
+      const key = row.inscripcion_id;
+      if (!inscripcionesMap.has(key)) {
+        inscripcionesMap.set(key, {
+          inscripcion_id: row.inscripcion_id,
+          estado_inscripcion: row.estado_inscripcion,
+          fecha_inscripcion: row.fecha_inscripcion,
+          plan: row.plan,
+          precio: row.precio,
+          deporte_id: row.deporte_id,
+          deporte: row.deporte,
+          icono: row.icono,
+          categoria: row.categoria,
+          nivel: row.nivel,
+          horarios: []
+        });
+      }
+      if (row.dia && row.hora_inicio) {
+        inscripcionesMap.get(key).horarios.push({
+          horario_id: row.horario_id,
+          dia: row.dia,
+          hora_inicio: row.hora_inicio,
+          hora_fin: row.hora_fin
+        });
+      }
+    });
+
+    const inscripciones = [];
+    inscripcionesMap.forEach(inscripcion => {
+      if (inscripcion.horarios.length > 0) {
+        inscripcion.horarios.forEach(horario => {
+          inscripciones.push({
+            ...inscripcion,
+            horario_id: horario.horario_id,
+            dia: horario.dia,
+            hora_inicio: horario.hora_inicio,
+            hora_fin: horario.hora_fin
+          });
+        });
+      } else {
+        inscripciones.push(inscripcion);
+      }
+    });
+
+    const montoNumerico = parseFloat(usuario.monto_pago) || 0;
+
+    return res.json({
+      success: true,
+      alumno: usuario,
+      pago: {
+        estado: usuario.estado_pago || 'pendiente',
+        fecha_pago: usuario.fecha_pago,
+        fecha_registro: usuario.fecha_pago || usuario.created_at,
+        monto: montoNumerico,
+        metodo_pago: usuario.numero_operacion ? `Operación: ${usuario.numero_operacion}` : 'Transferencia / Depósito',
+        numero_operacion: usuario.numero_operacion,
+        comprobante_url: usuario.comprobante_pago_url
+      },
+      inscripciones,
+      horarios: inscripciones,
+      resumen: {
+        total_inscripciones: inscripcionesMap.size
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error al consultar alumno por DNI:', error);
+    res.status(500).json({ success: false, error: 'Error interno al consultar alumno' });
   }
 });
 
@@ -3107,7 +3257,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           INNER JOIN deportes d ON i.deporte_id = d.deporte_id
           LEFT JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
           LEFT JOIN horarios h ON ih.horario_id = h.horario_id
-          WHERE i.estado != 'cancelada'
+          WHERE 1=1
         `;
         
         const params = [];
@@ -7606,6 +7756,8 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
     if (typeof invalidateDNICache === 'function') {
       invalidateDNICache(alumno.dni);
     }
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    if (inscritosKeys.length > 0) cache.del(inscritosKeys);
 
     console.log(`🗑️ OVERRIDE ADMIN (baja): horario ${horarioId} quitado de inscripcion ${inscripcionId} (${alumno.deporte}) del alumno DNI ${alumno.dni}`);
 
