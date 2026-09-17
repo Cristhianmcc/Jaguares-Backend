@@ -10195,9 +10195,10 @@ app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/in
 
     console.log(`🗑️ Inscripción ${inscripcionId} (${ins.deporte}) eliminada exitosamente para DNI ${dni}`);
 
+    const deporteLimpio = String(ins.deporte || '').replace(/FÃºtbol|FÃ°tbol|F\uFFFDtbol/gi, 'Fútbol');
     return res.json({
       success: true,
-      mensaje: `Inscripción de ${ins.deporte} eliminada correctamente`,
+      mensaje: `Inscripción de ${deporteLimpio} eliminada correctamente`,
       tieneOtrasInscripciones: tieneOtras
     });
 
