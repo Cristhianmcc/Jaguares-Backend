@@ -1668,7 +1668,10 @@ app.get('/api/consultar/:dni', async (req, res) => {
       }
     });
 
-    const montoNumerico = parseFloat(usuario.monto_pago) || 0;
+    // Si monto_pago está guardado usarlo; si es NULL (admin confirmó sin ingresar monto)
+    // calcular dinámicamente sumando precio_mensual de las inscripciones activas únicas
+    const montoNumerico = parseFloat(usuario.monto_pago) ||
+      Array.from(inscripcionesMap.values()).reduce((sum, i) => sum + parseFloat(i.precio || 0), 0);
 
     return res.json({
       success: true,
@@ -9881,6 +9884,17 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
       });
     }
     
+    // Si el admin no envió monto, calcularlo de las inscripciones pendientes del alumno
+    let montoFinal = monto_pago ? parseFloat(monto_pago) : null;
+    if (!montoFinal) {
+      const [inscPend] = await db.query(
+        'SELECT SUM(precio_mensual) as total FROM inscripciones WHERE alumno_id = ? AND estado = \'pendiente\'',
+        [alumno.alumno_id]
+      );
+      montoFinal = parseFloat(inscPend[0]?.total || 0) || null;
+      if (montoFinal) console.log(`💰 Monto calculado automáticamente: S/ ${montoFinal} para DNI ${dni}`);
+    }
+
     // Actualizar estado de pago en MySQL
     // COALESCE preserva el numero_operacion que cargó el alumno si el admin no envía uno nuevo
     await db.query(`
@@ -9893,7 +9907,7 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
         notas_pago = ?,
         updated_at = NOW()
       WHERE dni = ?
-    `, [monto_pago || null, numero_operacion || null, notas || null, dni]);
+    `, [montoFinal, numero_operacion || null, notas || null, dni]);
     
     // Activar todas las inscripciones del alumno en MySQL
     await db.query(`
