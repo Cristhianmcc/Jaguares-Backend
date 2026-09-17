@@ -8902,7 +8902,11 @@ const handlerValidarAccesoPuerta = async (req, res) => {
   try {
     const admin = req.admin || null;
     const adminId = admin ? admin.admin_id : null;
-    let { dni, forzar_ingreso } = req.body;
+    let { dni, forzar_ingreso, pago_clase, metodo_pago_clase, monto_clase } = req.body;
+    const esPagoClase = !!pago_clase;
+    const montoClaseNum = parseFloat(monto_clase || 15);
+    const metodoClaseStr = (metodo_pago_clase || 'Efectivo').trim();
+    const obsPagoClase = `Pago por clase: S/ ${montoClaseNum.toFixed(2)} (${metodoClaseStr})`;
 
     if (!dni) {
       return res.status(400).json({ success: false, error: 'DNI requerido' });
@@ -8993,7 +8997,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     const horarioHoy = inscripciones.find(i => norm(i.dia) === diaSemanaHoy);
     const diasInscritos = Array.from(new Set(inscripciones.map(i => i.dia).filter(Boolean)));
 
-    if (!horarioHoy && !forzar_ingreso) {
+    if (!horarioHoy && !forzar_ingreso && !esPagoClase) {
       // El alumno NO tiene clase hoy
       return res.json({
         success: true,
@@ -9084,12 +9088,16 @@ const handlerValidarAccesoPuerta = async (req, res) => {
 
     let asistenciaPuertaRegistrada = false;
 
-    // 6. Si está activo o el admin forzó el ingreso manualmente:
+    // 6. Si está activo o el admin forzó el ingreso manualmente (o pagó por clase):
     // NOTA DE SEGURIDAD: Solo registra asistencia en puerta si quien valida tiene sesión de admin/encargado
-    if (admin && (activo || forzar_ingreso)) {
+    if (admin && (activo || forzar_ingreso || esPagoClase)) {
       if (horarioIdFinal) {
         // hora Lima (UTC-5) ya calculada en horaActualStr como HH:MM
         const horaPuertaLima = horaActualStr + ':00';
+        const obsAsistencia = esPagoClase
+          ? obsPagoClase
+          : (forzar_ingreso ? 'Ingreso autorizado manualmente por administración' : 'Escaneo en puerta (Membresía activa)');
+
         await db.query(`
           INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, asistencia_puerta, hora_puerta, observaciones, registrado_por)
           VALUES (?, ?, ?, 0, 1, ?, ?, ?)
@@ -9103,11 +9111,18 @@ const handlerValidarAccesoPuerta = async (req, res) => {
           horarioIdFinal,
           fechaHoyStr,
           horaPuertaLima,
-          forzar_ingreso ? 'Ingreso autorizado manualmente por administración' : 'Escaneo en puerta (Membresía activa)',
+          obsAsistencia,
           adminId,
           horaPuertaLima
         ]);
         asistenciaPuertaRegistrada = true;
+
+        const estadoMembresiaLog = esPagoClase
+          ? 'pago_por_clase'
+          : (activo ? 'activa' : 'autorizada_manual');
+        const obsLog = esPagoClase
+          ? obsPagoClase
+          : (forzar_ingreso ? 'Autorizado manualmente por administración' : motivo);
 
         // Log en accesos_puerta
         await db.query(`
@@ -9118,29 +9133,34 @@ const handlerValidarAccesoPuerta = async (req, res) => {
           horarioIdFinal,
           fechaHoyStr,
           horaPuertaLima,
-          activo ? 'activa' : 'autorizada_manual',
-          forzar_ingreso ? 1 : 0,
+          estadoMembresiaLog,
+          (forzar_ingreso || esPagoClase) ? 1 : 0,
           adminId,
-          forzar_ingreso ? 'Autorizado manualmente por administración' : motivo
+          obsLog
         ]);
       }
     }
 
-    const aviso = activo
-      ? 'MEMBRESÍA ACTIVA'
-      : (forzar_ingreso ? 'INGRESO AUTORIZADO POR ADMINISTRACIÓN' : 'MEMBRESÍA INACTIVA - No ha pagado mensualidad');
+    const aviso = esPagoClase
+      ? `INGRESO AUTORIZADO — PAGO POR CLASE S/ ${montoClaseNum.toFixed(2)}`
+      : (activo
+        ? 'MEMBRESÍA ACTIVA'
+        : (forzar_ingreso ? 'INGRESO AUTORIZADO POR ADMINISTRACIÓN' : 'MEMBRESÍA INACTIVA - No ha pagado mensualidad'));
 
     return res.json({
       success: true,
-      activo: activo || !!forzar_ingreso,
+      activo: activo || !!forzar_ingreso || esPagoClase,
       sin_clase_hoy: false,
-      estado_original: activo ? 'activa' : 'inactiva',
+      es_pago_clase: esPagoClase,
+      monto_pago_clase: esPagoClase ? montoClaseNum : null,
+      metodo_pago_clase: esPagoClase ? metodoClaseStr : null,
+      estado_original: activo ? 'activa' : (esPagoClase ? 'pago_por_clase' : 'inactiva'),
       aviso,
-      motivo,
-      pase_entregado: activo || !!forzar_ingreso,
+      motivo: esPagoClase ? obsPagoClase : motivo,
+      pase_entregado: activo || !!forzar_ingreso || esPagoClase,
       asistencia_puerta_registrada: asistenciaPuertaRegistrada,
       hora_ingreso: horaActualStr,
-      puede_autorizar: !activo && !forzar_ingreso && !!admin,
+      puede_autorizar: !activo && !forzar_ingreso && !esPagoClase && !!admin,
       alumno: {
         alumno_id: alumno.alumno_id,
         dni: alumno.dni,
