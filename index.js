@@ -87,6 +87,48 @@ async function initDatabase() {
         console.warn('   Columnas disponibles:', cols.map(c => c.Field).join(', '));
       }
 
+            // 1. Normalizar registros existentes de pagos_mensuales: 'setiembre' -> 'septiembre'
+      try {
+        const [resSet] = await connection.query("UPDATE pagos_mensuales SET mes = 'septiembre' WHERE LOWER(mes) = 'setiembre'");
+        if (resSet.changedRows > 0) {
+          console.log(`✅ ${resSet.changedRows} pagos_mensuales normalizados de 'setiembre' a 'septiembre'`);
+        }
+      } catch (errSet) {
+        console.warn('⚠️ No se pudo normalizar setiembre en pagos_mensuales:', errSet.message);
+      }
+
+      // 2. Sincronizar alumnos inscritos en septiembre con pago confirmado que no tengan fila en pagos_mensuales
+      try {
+        const colYear = global.COL_ANIO || 'a\u00f1o';
+        const [resSync] = await connection.query(
+          'INSERT IGNORE INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, estado, fecha_pago, created_at) ' +
+          'SELECT ' +
+          '  a.alumno_id, ' +
+          '  "septiembre", ' +
+          '  2026, ' +
+          '  COALESCE(SUM(i.precio_mensual), a.monto_pago, 0), ' +
+          '  "confirmado", ' +
+          '  COALESCE(a.fecha_pago, a.created_at, NOW()), ' +
+          '  COALESCE(a.fecha_pago, a.created_at, NOW()) ' +
+          'FROM alumnos a ' +
+          'JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado = "activa" ' +
+          'WHERE a.estado_pago = "confirmado" ' +
+          '  AND a.created_at >= "2026-09-01 00:00:00" ' +
+          '  AND NOT EXISTS ( ' +
+          '    SELECT 1 FROM pagos_mensuales pm ' +
+          '    WHERE pm.alumno_id = a.alumno_id ' +
+          '      AND LOWER(pm.mes) IN ("septiembre", "setiembre") ' +
+          '      AND pm.`' + colYear + '` = 2026 ' +
+          '  ) ' +
+          'GROUP BY a.alumno_id'
+        );
+        if (resSync.affectedRows > 0) {
+          console.log(`✅ ${resSync.affectedRows} alumnos inscritos en septiembre sincronizados automáticamente a pagos_mensuales como confirmados`);
+        }
+      } catch (errSync) {
+        console.warn('⚠️ No se pudo sincronizar inscritos de septiembre a pagos_mensuales:', errSync.message);
+      }
+
       // Agregar columna observaciones si no existe
       const tieneObs = cols.find(c => c.Field === 'observaciones');
       if (!tieneObs) {
@@ -2444,7 +2486,8 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     console.log(`📋 pagos-mensuales → estado=${estado} mes=${mes} deporte=${deporte} grupo=${grupo} buscar=${buscar}`);
     const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
     const ahora = new Date();
-    const mesActual = ahora.toLocaleString('es-PE', { month: 'long' });
+    const NOMBRES_MESES_NORM_PM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mesActual = NOMBRES_MESES_NORM_PM[ahora.getMonth()];
     const anioActual = ahora.getFullYear();
     const filtroMes = mes || mesActual;
     const filtroAnio = anio ? parseInt(anio, 10) : anioActual;
@@ -2483,11 +2526,15 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       params.push(estado);
     }
     if (mes) {
-      // Normalizar filtro: 'setiembre' y 'Septiembre' -> 'septiembre'
+      // Normalizar filtro: aceptar tanto 'setiembre' como 'septiembre'
       const MAPA_MESES_FILTRO = { 'setiembre': 'septiembre' };
       const mesFiltro = (MAPA_MESES_FILTRO[mes.toLowerCase()] || mes.toLowerCase());
-      query += ' AND LOWER(pm.mes) = ?';
-      params.push(mesFiltro);
+      if (mesFiltro === 'septiembre') {
+        query += " AND LOWER(pm.mes) IN ('septiembre', 'setiembre')";
+      } else {
+        query += ' AND LOWER(pm.mes) = ?';
+        params.push(mesFiltro);
+      }
     }
     if (anio) {
       // Se filtra por año en JS después de la consulta
@@ -2542,7 +2589,8 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 
       for (let mIdx = 0; mIdx < mesesABuscar.length; mIdx++) {
         const mesRevision = mesesABuscar[mIdx];
-        const pendienteParamsMes = [mesRevision, filtroAnio];
+        const esSeptiembre = (mesRevision === 'septiembre' || mesRevision === 'setiembre');
+        const pendienteParamsMes = esSeptiembre ? [filtroAnio] : [mesRevision, filtroAnio];
         
         // Calcular el último día del mes en revisión para filtrar por fecha de inscripción
         const mesNumero = MESES_ORDEN.indexOf(mesRevision) + 1;
@@ -2565,7 +2613,11 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         }
 
         // LEFT JOIN al final — así pm.pago_id IS NULL funciona correctamente
-        pendientesQuery += ` LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.\`${colYear}\` = ?`;
+        if (esSeptiembre) {
+          pendientesQuery += ` LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND LOWER(pm.mes) IN ('septiembre', 'setiembre') AND pm.\`${colYear}\` = ?`;
+        } else {
+          pendientesQuery += ` LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND pm.mes = ? AND pm.\`${colYear}\` = ?`;
+        }
 
         pendientesQuery += ' WHERE pm.pago_id IS NULL AND i.created_at <= ?';
         pendienteParamsMes.push(fechaLimite);
@@ -9944,7 +9996,8 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     try {
       const ahora = new Date();
       // El sistema usa nombres de mes en español (igual que el resto de pagos_mensuales)
-      const mesNombreActual = ahora.toLocaleString('es-PE', { month: 'long' }).toLowerCase().split(' ')[0];
+      const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const mesNombreActual = NOMBRES_MESES_NORM[ahora.getMonth()];
       const anioActual = ahora.getFullYear();
       // Usar la misma columna dinámica que el resto del sistema (puede ser 'año' o 'anio')
       const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
