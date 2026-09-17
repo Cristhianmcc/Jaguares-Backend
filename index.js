@@ -10112,6 +10112,101 @@ app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) =>
  * PUT /api/admin/inscripciones/:dni/rechazar-pago
  * Rechazar pago y marcar inscripciones como pendientes
  */
+
+/**
+ * DELETE /api/admin/inscripciones/individual/:inscripcionId
+ * DELETE /api/admin/inscripcion/:inscripcionId
+ * Eliminar una inscripción específica (por inscripcion_id) sin afectar otras inscripciones del alumno
+ */
+app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/inscripcion/:inscripcionId'], async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+    const { inscripcionId } = req.params;
+
+    // 1. Obtener datos de la inscripción a eliminar
+    const [rows] = await db.query(`
+      SELECT i.inscripcion_id, i.alumno_id, i.estado, d.nombre as deporte, a.dni, a.nombres, a.apellido_paterno
+      FROM inscripciones i
+      JOIN alumnos a ON i.alumno_id = a.alumno_id
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE i.inscripcion_id = ?
+    `, [inscripcionId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+    }
+
+    const ins = rows[0];
+    const alumnoId = ins.alumno_id;
+    const dni = ins.dni;
+
+    // 2. Contar cuántas otras inscripciones activas/pendientes le quedan al alumno
+    const [restantes] = await db.query(`
+      SELECT COUNT(*) as total
+      FROM inscripciones
+      WHERE alumno_id = ? AND inscripcion_id != ? AND estado IN ('activa', 'pendiente')
+    `, [alumnoId, inscripcionId]);
+
+    const tieneOtras = restantes[0].total > 0;
+
+    // 3. Eliminar la inscripción específica
+    // Se eliminan los horarios asociados para activar el trigger de liberación de cupos
+    await db.query('DELETE FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcionId]);
+    await db.query('DELETE FROM inscripciones WHERE inscripcion_id = ?', [inscripcionId]);
+
+    // 4. Si era su única inscripción activa, actualizar estado del alumno a 'inactivo'
+    if (!tieneOtras) {
+      await db.query("UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?", [alumnoId]);
+      console.log(`🔴 Alumno ${dni} marcado inactivo (sin más inscripciones activas tras borrar inscripción ${inscripcionId})`);
+    } else {
+      console.log(`🟢 Alumno ${dni} permanece activo con ${restantes[0].total} inscripción(es) activa(s)`);
+    }
+
+    // 5. Ajustar mensualidades en pagos_mensuales si quedaron pendientes del mes actual
+    try {
+      const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const mesActual = NOMBRES_MESES_NORM[new Date().getMonth()];
+      const [activasRows] = await db.query(
+        `SELECT COALESCE(SUM(precio_mensual), 0) as total_mensual
+         FROM inscripciones
+         WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+        [alumnoId]
+      );
+      const nuevoMontoTotal = parseFloat(activasRows[0].total_mensual) || 0;
+      if (nuevoMontoTotal > 0) {
+        await db.query(
+          "UPDATE pagos_mensuales SET monto = ? WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'",
+          [nuevoMontoTotal, alumnoId, mesActual]
+        );
+      }
+    } catch (ePm) {
+      console.warn('Advertencia al recalcular pagos_mensuales:', ePm.message);
+    }
+
+    // 6. Limpiar cachés
+    if (typeof invalidateDNICache === 'function') {
+      invalidateDNICache(dni);
+    }
+    cache.del(getCacheKey('inscritos', 'all_all'));
+    cache.del(getCacheKey('inscripciones', dni));
+    cache.del(getCacheKey('horarios'));
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    if (inscritosKeys.length > 0) cache.del(inscritosKeys);
+
+    console.log(`🗑️ Inscripción ${inscripcionId} (${ins.deporte}) eliminada exitosamente para DNI ${dni}`);
+
+    return res.json({
+      success: true,
+      mensaje: `Inscripción de ${ins.deporte} eliminada correctamente`,
+      tieneOtrasInscripciones: tieneOtras
+    });
+
+  } catch (error) {
+    console.error('Error al eliminar inscripción individual:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.put('/api/admin/inscripciones/:dni/rechazar-pago', async (req, res) => {
   try {
     const { dni } = req.params;
