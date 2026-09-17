@@ -9020,31 +9020,36 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     // NOTA DE SEGURIDAD: Solo registra asistencia en puerta si quien valida tiene sesión de admin/encargado
     if (admin && (activo || forzar_ingreso)) {
       if (horarioIdFinal) {
+        // hora Lima (UTC-5) ya calculada en horaActualStr como HH:MM
+        const horaPuertaLima = horaActualStr + ':00';
         await db.query(`
           INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, asistencia_puerta, hora_puerta, observaciones, registrado_por)
-          VALUES (?, ?, ?, 0, 1, CURTIME(), ?, ?)
+          VALUES (?, ?, ?, 0, 1, ?, ?, ?)
           ON DUPLICATE KEY UPDATE 
             asistencia_puerta = 1,
-            hora_puerta = CURTIME(),
+            hora_puerta = ?,
             observaciones = VALUES(observaciones),
             registrado_por = VALUES(registrado_por)
         `, [
           alumno.alumno_id,
           horarioIdFinal,
           fechaHoyStr,
+          horaPuertaLima,
           forzar_ingreso ? 'Ingreso autorizado manualmente por administración' : 'Escaneo en puerta (Membresía activa)',
-          adminId
+          adminId,
+          horaPuertaLima
         ]);
         asistenciaPuertaRegistrada = true;
 
         // Log en accesos_puerta
         await db.query(`
           INSERT INTO accesos_puerta (alumno_id, horario_id, fecha, hora, estado_membresia, autorizado_manual, registrado_por, observaciones)
-          VALUES (?, ?, ?, CURTIME(), ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           alumno.alumno_id,
           horarioIdFinal,
           fechaHoyStr,
+          horaPuertaLima,
           activo ? 'activa' : 'autorizada_manual',
           forzar_ingreso ? 1 : 0,
           adminId,
