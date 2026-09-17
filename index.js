@@ -8870,7 +8870,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     const [alumnosRows] = await db.query(`
       SELECT 
         a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
-        a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado
+        a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado, a.created_at
       FROM alumnos a
       WHERE a.dni = ?
       LIMIT 1
@@ -8979,9 +8979,11 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     let motivo = '';
 
     if (diaMes >= 1 && diaMes <= 5) {
+      // Días 1 al 5: Período regular de gracia para pagar mensualidad
       activo = true;
       motivo = `Período regular de pago (Día ${diaMes} de 5 de ${mesActual})`;
     } else {
+      // A partir del día 6: Se exige mensualidad del mes actual confirmada
       const colAnio = global.COL_ANIO || 'anio';
       const [pagosMes] = await db.query(`
         SELECT pm.*
@@ -8997,19 +8999,33 @@ const handlerValidarAccesoPuerta = async (req, res) => {
         activo = true;
         motivo = `Mensualidad de ${mesActual} ${anioActual} confirmada`;
       } else {
-        const pagoConfirmado = alumno.estado_pago === 'confirmado' || alumno.estado_pago === 'pagado';
-        const [pagosPendientes] = await db.query(`
-          SELECT pm.pago_id FROM pagos_mensuales pm
-          WHERE pm.alumno_id = ? AND LOWER(pm.mes) = ? AND pm.${colAnio} = ? AND pm.estado IN ('pendiente', 'rechazado')
-          LIMIT 1
-        `, [alumno.alumno_id, mesActual.toLowerCase(), anioActual]);
+        // Verificar si es un alumno nuevo recién matriculado en este mes actual
+        const fechaCreacion = alumno.created_at ? new Date(alumno.created_at) : null;
+        const inscritoEsteMes = fechaCreacion &&
+          (fechaCreacion.getUTCFullYear() === anioActual) &&
+          (fechaCreacion.getUTCMonth() === ahoraPeru.getUTCMonth()) &&
+          (alumno.estado_pago === 'confirmado' || alumno.estado_pago === 'pagado');
 
-        if (pagoConfirmado && pagosPendientes.length === 0) {
+        if (inscritoEsteMes) {
           activo = true;
-          motivo = `Membresía activa con pago confirmado`;
+          motivo = `Matrícula reciente confirmada (${mesActual} ${anioActual})`;
         } else {
+          // Alumno sin mensualidad confirmada para este mes: INACTIVO
+          const [pagosEstado] = await db.query(`
+            SELECT pm.estado FROM pagos_mensuales pm
+            WHERE pm.alumno_id = ? AND LOWER(pm.mes) = ? AND pm.${colAnio} = ?
+            ORDER BY pm.pago_id DESC
+            LIMIT 1
+          `, [alumno.alumno_id, mesActual.toLowerCase(), anioActual]);
+
           activo = false;
-          motivo = `Sin pago de mensualidad confirmado para ${mesActual} (Vencido desde el 6 de ${mesActual})`;
+          if (pagosEstado.length > 0 && pagosEstado[0].estado === 'pendiente') {
+            motivo = `Comprobante de ${mesActual} subido, pendiente de aprobación por administración`;
+          } else if (pagosEstado.length > 0 && pagosEstado[0].estado === 'rechazado') {
+            motivo = `El pago de mensualidad de ${mesActual} fue rechazado por administración`;
+          } else {
+            motivo = `Sin pago de mensualidad confirmado para ${mesActual} (Vencido desde el 6 de ${mesActual})`;
+          }
         }
       }
     }
