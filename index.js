@@ -6739,6 +6739,128 @@ app.post('/api/admin/upload-image', verificarAutenticacion, verificarAdmin, imag
   }
 });
 
+// ==========================================
+// FOTOS DE CARNET DE ALUMNOS (ALMACENAMIENTO LIGERO EN DISCO)
+// ==========================================
+const CARNETS_UPLOADS_DIR = path.resolve(process.env.CARNETS_UPLOADS_DIR || path.join(__dirname, 'uploads', 'carnets'));
+if (!fs.existsSync(CARNETS_UPLOADS_DIR)) fs.mkdirSync(CARNETS_UPLOADS_DIR, { recursive: true });
+
+app.use('/uploads/carnets', (_req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(CARNETS_UPLOADS_DIR, {
+  fallthrough: false,
+  maxAge: '1d',
+  index: false
+}));
+
+const getFotoCarnetUrl = (req, filename) => {
+  const configuredBase = process.env.CMS_MEDIA_BASE_URL?.replace(/\/$/, '') ||
+    (process.env.NODE_ENV === 'production' ? 'https://api.jaguarescar.com' : '');
+  const mediaPath = `/uploads/carnets/${filename}`;
+  return configuredBase ? `${configuredBase}${mediaPath}` : mediaPath;
+};
+
+const carnetStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, CARNETS_UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = IMAGE_MIME_EXTENSIONS[file.mimetype] || '.jpg';
+    const dni = (req.params.dni || 'alumno').replace(/[^a-zA-Z0-9]/g, '');
+    const name = `carnet-${dni}-${Date.now()}${ext}`;
+    cb(null, name);
+  }
+});
+
+const carnetUpload = multer({
+  storage: carnetStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB máx
+  fileFilter: (_req, file, cb) => {
+    const valid = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
+    if (!valid) {
+      return cb(new Error('Formato no permitido. Solo se aceptan imágenes JPG, PNG o WebP.'));
+    }
+    cb(null, true);
+  }
+});
+
+// POST /api/admin/alumnos/:dni/foto-carnet
+app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verificarAdmin, carnetUpload.single('foto'), async (req, res) => {
+  try {
+    const { dni } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+    }
+
+    const [alumnos] = await db.query(
+      'SELECT alumno_id, nombres, apellido_paterno, apellido_materno, foto_carnet_url FROM alumnos WHERE dni = ? LIMIT 1',
+      [dni]
+    );
+
+    if (alumnos.length === 0) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado con el DNI proporcionado' });
+    }
+
+    const alumno = alumnos[0];
+    const fotoAnterior = alumno.foto_carnet_url;
+
+    // Si la foto anterior era un archivo local en /uploads/carnets/, borrar el archivo físico antiguo para no acumular espacio
+    if (fotoAnterior && fotoAnterior.includes('/uploads/carnets/')) {
+      try {
+        const nombreArchivoAntiguo = path.basename(fotoAnterior.split('?')[0]);
+        const rutaAntigua = path.join(CARNETS_UPLOADS_DIR, nombreArchivoAntiguo);
+        if (fs.existsSync(rutaAntigua) && rutaAntigua !== req.file.path) {
+          fs.unlinkSync(rutaAntigua);
+          console.log('🗑️ Foto carnet anterior eliminada del disco:', nombreArchivoAntiguo);
+        }
+      } catch (errDel) {
+        console.warn('⚠️ No se pudo eliminar la foto carnet anterior del disco:', errDel.message);
+      }
+    }
+
+    const nuevaFotoUrl = getFotoCarnetUrl(req, req.file.filename);
+
+    await db.query(
+      'UPDATE alumnos SET foto_carnet_url = ? WHERE alumno_id = ?',
+      [nuevaFotoUrl, alumno.alumno_id]
+    );
+
+    // Invalidar cachés en memoria
+    try {
+      cache.flushAll();
+    } catch (_) {}
+
+    // Registrar log administrativo
+    try {
+      const adminId = req.admin?.admin_id || null;
+      await db.query(
+        `INSERT INTO logs_actividad (tipo, descripcion, usuario_id, datos)
+         VALUES ('actualizar_foto_carnet', ?, ?, ?)`,
+        [
+          `Actualización de foto tamaño carnet para DNI ${dni} (${alumno.nombres})`,
+          adminId,
+          JSON.stringify({ dni, alumno_id: alumno.alumno_id, foto_url: nuevaFotoUrl })
+        ]
+      );
+    } catch (_) {}
+
+    console.log(`✅ Foto tamaño carnet actualizada para alumno DNI ${dni}: ${nuevaFotoUrl}`);
+
+    return res.json({
+      success: true,
+      mensaje: 'Foto tamaño carnet actualizada correctamente',
+      foto_carnet_url: nuevaFotoUrl,
+      alumno_id: alumno.alumno_id
+    });
+  } catch (error) {
+    console.error('Error al actualizar foto tamaño carnet:', error);
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
+    return res.status(500).json({ success: false, error: error.message || 'Error interno al procesar la foto' });
+  }
+});
+
 
 function leerLandingContent() {
   try {
