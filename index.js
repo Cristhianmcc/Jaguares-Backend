@@ -3260,14 +3260,14 @@ app.put('/api/admin/configuracion/:clave', verificarAutenticacion, verificarAdmi
 // Obtener todos los inscritos (PROTEGIDO)
 app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimiterAdmin, async (req, res) => {
   try {
-    const { dia, deporte } = req.query;
+    const { dia, deporte, refresh } = req.query;
     
     // Crear clave de caché única basada en los filtros
     const cacheKey = `inscritos_${dia || 'all'}_${deporte || 'all'}`;
     
     // Intentar obtener del caché
     const cachedData = cache.get(cacheKey);
-    if (cachedData) {
+    if (cachedData && refresh !== 'true') {
       console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
       return res.json(cachedData);
     }
@@ -3351,7 +3351,9 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           estado_usuario: row.estado_usuario,
           estado: row.estado_inscripcion,
           estado_pago: row.estado_pago,
-          fecha_registro: row.fecha_registro
+          fecha_registro: row.fecha_registro,
+          foto_carnet_url: row.foto_carnet_url || null,
+          dni_frontal_url: row.dni_frontal_url || null
         }));
         
         const data = {
