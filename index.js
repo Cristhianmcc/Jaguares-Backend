@@ -3305,6 +3305,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
             a.created_at as fecha_registro,
             i.inscripcion_id,
             d.nombre as deporte,
+            GROUP_CONCAT(DISTINCT h.categoria SEPARATOR ', ') as categoria,
             GROUP_CONCAT(DISTINCT CONCAT(h.dia, ' ', TIME_FORMAT(h.hora_inicio, '%H:%i'), '-', TIME_FORMAT(h.hora_fin, '%H:%i')) ORDER BY FIELD(h.dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO') SEPARATOR ', ') as horario_completo,
             i.estado as estado_inscripcion
           FROM alumnos a
@@ -3341,6 +3342,8 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           dni: row.dni,
           nombres: row.nombres,
           apellidos: `${row.apellido_paterno || ''} ${row.apellido_materno || ''}`.trim(),
+          fecha_nacimiento: row.fecha_nacimiento,
+          categoria: row.categoria || null,
           telefono: row.telefono,
           email: row.email,
           deporte: row.deporte,
