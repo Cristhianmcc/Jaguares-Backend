@@ -7025,6 +7025,51 @@ app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verifica
 });
 
 
+
+// GET /api/admin/proxy-image?url=...
+// Proxy seguro para imágenes remotas (Google Drive, etc.) que permite usarlas en canvas sin bloqueo CORS
+app.get('/api/admin/proxy-image', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ success: false, error: 'URL requerida' });
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ success: false, error: 'URL inválida' });
+    }
+
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return res.status(400).json({ success: false, error: 'Protocolo no permitido' });
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ success: false, error: 'Error al obtener imagen remota: ' + response.statusText });
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Error en proxy-image:', error);
+    return res.status(500).json({ success: false, error: 'Error al procesar la imagen remota' });
+  }
+});
+
 function leerLandingContent() {
   try {
     const raw = fs.readFileSync(LANDING_CONTENT_PATH, 'utf-8');
