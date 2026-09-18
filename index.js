@@ -135,6 +135,11 @@ async function initDatabase() {
         await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN observaciones TEXT NULL');
         console.log('\u2705 Columna observaciones agregada a pagos_mensuales');
       }
+      const tieneNumOp = cols.find(c => c.Field === 'numero_operacion');
+      if (!tieneNumOp) {
+        await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN numero_operacion VARCHAR(100) NULL');
+        console.log('\u2705 Columna numero_operacion agregada a pagos_mensuales');
+      }
       // Migrar unique key para permitir pagos parciales (split por deporte)
       try {
         const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
@@ -2331,9 +2336,9 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
  * POST /api/pago-mensual
  * Subir comprobante de pago mensual directamente a Google Drive
  */
-app.post('/api/pago-mensual', async (req, res) => {
+app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
   try {
-    const { dni, alumno, imagen, nombre_archivo, mes, monto } = req.body;
+    const { dni, alumno, imagen, nombre_archivo, mes, monto, numero_operacion } = req.body;
     
     // Validaciones
     if (!dni || !imagen || !nombre_archivo) {
@@ -2445,15 +2450,15 @@ app.post('/api/pago-mensual', async (req, res) => {
     if (existePago.length > 0) {
       // Actualizar el pago pendiente existente
       await db.query(
-        'UPDATE pagos_mensuales SET comprobante_url = ?, monto = ?, fecha_pago = NOW() WHERE pago_id = ?',
-        [urlComprobante, monto || 0, existePago[0].pago_id]
+        'UPDATE pagos_mensuales SET comprobante_url = ?, monto = ?, numero_operacion = COALESCE(?, numero_operacion), fecha_pago = NOW() WHERE pago_id = ?',
+        [urlComprobante, monto || 0, (numero_operacion || '').trim() || null, existePago[0].pago_id]
       );
     } else {
       // Crear nuevo pago pendiente
       await db.query(
-        'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, comprobante_url, estado, metodo_pago, fecha_pago, created_at)' +
-        " VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', NOW(), NOW())",
-        [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante]
+        'INSERT INTO pagos_mensuales (alumno_id, mes, `' + colYear + '`, monto, comprobante_url, estado, metodo_pago, numero_operacion, fecha_pago, created_at)' +
+        " VALUES (?, ?, ?, ?, ?, 'pendiente', 'Transferencia/Plin', ?, NOW(), NOW())",
+        [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante, (numero_operacion || '').trim() || null]
       );
     }
     console.log('✅ Pago mensual registrado en MySQL');
@@ -2782,7 +2787,7 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
       return res.status(404).json({ success: false, error: 'Pago no encontrado' });
     }
 
-    let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', observaciones = COALESCE(?, observaciones)`;
+    let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = COALESCE(fecha_pago, NOW()), observaciones = COALESCE(?, observaciones)`;
     const updateParams = [observaciones || null];
     
     // Si se envía un monto ajustado, actualizar también
@@ -3601,28 +3606,91 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       WHERE i.estado = 'activa'
     `);
 
-    // 2. INGRESOS DEL MES ACTUAL - Solo inscripciones activas del mes
-    const [ingresosMes] = await db.query(`
-      SELECT 
-        SUM(CASE WHEN i.matricula_pagada = 1 THEN d.matricula ELSE 0 END) as matriculas_mes,
-        SUM(i.precio_mensual) as mensualidades_mes
-      FROM inscripciones i
-      INNER JOIN deportes d ON i.deporte_id = d.deporte_id
-      WHERE i.estado = 'activa'
-        AND MONTH(i.fecha_inscripcion) = MONTH(CURRENT_DATE())
-        AND YEAR(i.fecha_inscripcion) = YEAR(CURRENT_DATE())
+    // 2. INGRESOS DEL MES ACTUAL - Combina mensualidades confirmadas en pagos_mensuales y nuevas inscripciones
+    const colYear = global.COL_ANIO || 'año';
+    const [mesPagosMensuales] = await db.query(`
+      SELECT COALESCE(SUM(pm.monto), 0) as total_pm_mes
+      FROM pagos_mensuales pm
+      WHERE pm.estado = 'confirmado'
+        AND (
+          (MONTH(pm.fecha_pago) = MONTH(CURRENT_DATE()) AND YEAR(pm.fecha_pago) = YEAR(CURRENT_DATE()))
+          OR (pm.mes IN ('septiembre', 'setiembre') AND pm.\`${colYear}\` = YEAR(CURRENT_DATE()))
+        )
     `);
 
-    // 3. INGRESOS DE HOY - Solo inscripciones activas de hoy
-    const [ingresosHoy] = await db.query(`
+    const [mesInscripcionesNuevas] = await db.query(`
       SELECT 
-        SUM(CASE WHEN i.matricula_pagada = 1 THEN d.matricula ELSE 0 END) as matriculas_hoy,
-        SUM(i.precio_mensual) as mensualidades_hoy
+        COALESCE(SUM(CASE WHEN i.matricula_pagada = 1 THEN d.matricula ELSE 0 END), 0) as matriculas_mes,
+        COALESCE(SUM(i.precio_mensual), 0) as mensualidades_insc_mes
       FROM inscripciones i
       INNER JOIN deportes d ON i.deporte_id = d.deporte_id
+      INNER JOIN alumnos a ON i.alumno_id = a.alumno_id
       WHERE i.estado = 'activa'
-        AND DATE(i.fecha_inscripcion) = CURRENT_DATE()
+        AND (
+          (MONTH(COALESCE(a.fecha_pago, i.fecha_inscripcion)) = MONTH(CURRENT_DATE()) AND YEAR(COALESCE(a.fecha_pago, i.fecha_inscripcion)) = YEAR(CURRENT_DATE()))
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM pagos_mensuales pm 
+          WHERE pm.alumno_id = a.alumno_id 
+            AND pm.estado = 'confirmado' 
+            AND (MONTH(pm.fecha_pago) = MONTH(CURRENT_DATE()) AND YEAR(pm.fecha_pago) = YEAR(CURRENT_DATE()))
+        )
     `);
+
+    const totalMensualidadesMes = parseFloat(mesPagosMensuales[0]?.total_pm_mes || 0) + parseFloat(mesInscripcionesNuevas[0]?.mensualidades_insc_mes || 0);
+    const totalMatriculasMes = parseFloat(mesInscripcionesNuevas[0]?.matriculas_mes || 0);
+
+    // 3. INGRESOS DE HOY - Mensualidades confirmadas hoy + inscripciones activadas hoy
+    const [hoyPagosMensuales] = await db.query(`
+      SELECT COALESCE(SUM(pm.monto), 0) as total_pm_hoy
+      FROM pagos_mensuales pm
+      WHERE pm.estado = 'confirmado'
+        AND DATE(pm.fecha_pago) = CURRENT_DATE()
+    `);
+
+    const [hoyInscripciones] = await db.query(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN i.matricula_pagada = 1 THEN d.matricula ELSE 0 END), 0) as matriculas_hoy,
+        COALESCE(SUM(i.precio_mensual), 0) as mensualidades_insc_hoy
+      FROM inscripciones i
+      INNER JOIN deportes d ON i.deporte_id = d.deporte_id
+      INNER JOIN alumnos a ON i.alumno_id = a.alumno_id
+      WHERE i.estado = 'activa'
+        AND a.estado_pago = 'confirmado'
+        AND (DATE(a.fecha_pago) = CURRENT_DATE() OR DATE(i.fecha_inscripcion) = CURRENT_DATE())
+        AND NOT EXISTS (
+          SELECT 1 FROM pagos_mensuales pm 
+          WHERE pm.alumno_id = a.alumno_id 
+            AND pm.estado = 'confirmado' 
+            AND DATE(pm.fecha_pago) = CURRENT_DATE()
+        )
+    `);
+
+    const totalMensualidadesHoy = parseFloat(hoyPagosMensuales[0]?.total_pm_hoy || 0) + parseFloat(hoyInscripciones[0]?.mensualidades_insc_hoy || 0);
+    const totalMatriculasHoy = parseFloat(hoyInscripciones[0]?.matriculas_hoy || 0);
+
+    // Desglose mensual por mes/deporte
+    let desgloseMensual = [];
+    try {
+      const [desglose] = await db.query(`
+        SELECT 
+          pm.mes,
+          pm.\`${colYear}\` as anio,
+          COALESCE(d.nombre, 'General') as deporte,
+          COUNT(DISTINCT pm.pago_id) as cantidad_pagos,
+          SUM(pm.monto) as total_recaudado
+        FROM pagos_mensuales pm
+        LEFT JOIN alumnos a ON pm.alumno_id = a.alumno_id
+        LEFT JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado = 'activa'
+        LEFT JOIN deportes d ON i.deporte_id = d.deporte_id
+        WHERE pm.estado = 'confirmado'
+        GROUP BY pm.mes, pm.\`${colYear}\`, d.nombre
+        ORDER BY anio DESC
+      `);
+      desgloseMensual = desglose;
+    } catch (errDesglose) {
+      console.warn('⚠️ No se pudo generar desglose mensual:', errDesglose.message);
+    }
 
     // 4. ESTADÍSTICAS POR DEPORTE - Solo inscripciones activas
     const [porDeporte] = await db.query(`
@@ -3672,8 +3740,8 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
         totalMatriculas: parseFloat(resumen.total_matriculas) || 0,
         totalMensualidades: parseFloat(resumen.total_mensualidades) || 0,
         totalIngresosActivos: parseFloat(resumen.total_ingresos) || 0,
-        ingresosMes: (parseFloat(mesData.matriculas_mes) || 0) + (parseFloat(mesData.mensualidades_mes) || 0),
-        ingresosHoy: (parseFloat(hoyData.matriculas_hoy) || 0) + (parseFloat(hoyData.mensualidades_hoy) || 0)
+        ingresosMes: totalMatriculasMes + totalMensualidadesMes,
+        ingresosHoy: totalMatriculasHoy + totalMensualidadesHoy
       },
       porDeporte: porDeporte.map(d => ({
         deporte: d.deporte,
@@ -3682,6 +3750,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
         mensualidades: parseFloat(d.mensualidades) || 0,
         total: parseFloat(d.total) || 0
       })),
+      desgloseMensual: desgloseMensual || [],
       porAlumno: porAlumno.map(a => ({
         dni: a.dni,
         nombres: a.nombres,
@@ -9668,25 +9737,27 @@ app.get('/api/admin/reporte-alumnos', async (req, res) => {
     
     let query = `
       SELECT DISTINCT
-        i.dni,
-        i.nombres,
-        i.apellido_paterno,
-        i.apellido_materno,
-        i.fecha_nacimiento,
-        i.sexo,
-        i.telefono,
-        i.apoderado,
+        COALESCE(a.dni, i.dni) as dni,
+        COALESCE(a.nombres, i.nombres) as nombres,
+        COALESCE(a.apellido_paterno, i.apellido_paterno) as apellido_paterno,
+        COALESCE(a.apellido_materno, i.apellido_materno) as apellido_materno,
+        COALESCE(a.fecha_nacimiento, i.fecha_nacimiento) as fecha_nacimiento,
+        COALESCE(a.sexo, i.sexo) as sexo,
+        COALESCE(a.telefono, i.telefono) as telefono,
+        COALESCE(a.apoderado, i.apoderado) as apoderado,
         d.nombre as deporte,
         h.dia,
         h.hora_inicio,
         h.hora_fin,
         c.nombre as categoria
       FROM inscripciones i
+      LEFT JOIN alumnos a ON i.alumno_id = a.alumno_id
       INNER JOIN inscripcion_horarios ih ON i.inscripcion_id = ih.inscripcion_id
       INNER JOIN horarios h ON ih.horario_id = h.horario_id
       INNER JOIN deportes d ON h.deporte_id = d.deporte_id
       LEFT JOIN categorias c ON h.categoria_id = c.categoria_id
-      WHERE i.estado_pago = 'pagado'
+      WHERE i.estado != 'cancelada'
+        AND (i.estado = 'activa' OR i.estado_pago IN ('pagado', 'confirmado') OR a.estado_pago IN ('pagado', 'confirmado'))
     `;
     
     const params = [];
@@ -9859,6 +9930,7 @@ app.get('/api/admin/inscripciones', async (req, res) => {
         a.created_at,
         a.updated_at,
         COUNT(i.inscripcion_id) as total_inscripciones,
+        SUM(CASE WHEN i.estado = 'pendiente' THEN 1 ELSE 0 END) as inscripciones_pendientes,
         GROUP_CONCAT(DISTINCT d.nombre SEPARATOR ', ') as deportes_inscritos
       FROM alumnos a
       LEFT JOIN inscripciones i ON a.alumno_id = i.alumno_id AND i.estado IN ('activa', 'pendiente')
@@ -9869,7 +9941,12 @@ app.get('/api/admin/inscripciones', async (req, res) => {
     const params = [];
     
     // Filtro por estado de pago
-    if (estado_pago !== 'todos') {
+    if (estado_pago === 'pendiente') {
+      query += ' AND (a.estado_pago = ? OR EXISTS (SELECT 1 FROM inscripciones ip WHERE ip.alumno_id = a.alumno_id AND ip.estado = "pendiente"))';
+      params.push(estado_pago);
+    } else if (estado_pago === 'confirmado') {
+      query += ' AND (a.estado_pago = "confirmado" AND NOT EXISTS (SELECT 1 FROM inscripciones ip WHERE ip.alumno_id = a.alumno_id AND ip.estado = "pendiente"))';
+    } else if (estado_pago !== 'todos') {
       query += ' AND a.estado_pago = ?';
       params.push(estado_pago);
     }
@@ -9893,7 +9970,12 @@ app.get('/api/admin/inscripciones', async (req, res) => {
     let countQuery = 'SELECT COUNT(DISTINCT a.alumno_id) as total FROM alumnos a WHERE 1=1';
     const countParams = [];
     
-    if (estado_pago !== 'todos') {
+    if (estado_pago === 'pendiente') {
+      countQuery += ' AND (a.estado_pago = ? OR EXISTS (SELECT 1 FROM inscripciones ip WHERE ip.alumno_id = a.alumno_id AND ip.estado = "pendiente"))';
+      countParams.push(estado_pago);
+    } else if (estado_pago === 'confirmado') {
+      countQuery += ' AND (a.estado_pago = "confirmado" AND NOT EXISTS (SELECT 1 FROM inscripciones ip WHERE ip.alumno_id = a.alumno_id AND ip.estado = "pendiente"))';
+    } else if (estado_pago !== 'todos') {
       countQuery += ' AND a.estado_pago = ?';
       countParams.push(estado_pago);
     }
@@ -10097,10 +10179,16 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     
     const alumno = alumnos[0];
     
-    if (alumno.estado_pago === 'confirmado') {
+    // Verificar inscripciones pendientes del alumno
+    const [inscPendientes] = await db.query(
+      "SELECT inscripcion_id, precio_mensual FROM inscripciones WHERE alumno_id = ? AND estado = 'pendiente'",
+      [alumno.alumno_id]
+    );
+
+    if (alumno.estado_pago === 'confirmado' && inscPendientes.length === 0) {
       return res.status(400).json({ 
         success: false, 
-        error: 'El pago ya está confirmado' 
+        error: 'El pago ya está confirmado y no hay inscripciones pendientes' 
       });
     }
     
