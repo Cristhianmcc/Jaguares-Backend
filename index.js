@@ -140,6 +140,19 @@ async function initDatabase() {
         await connection.query('ALTER TABLE pagos_mensuales ADD COLUMN numero_operacion VARCHAR(100) NULL');
         console.log('\u2705 Columna numero_operacion agregada a pagos_mensuales');
       }
+
+      // Sincronizar comprobantes de alumnos a pagos_mensuales si están vacíos
+      try {
+        await connection.query(
+          'UPDATE pagos_mensuales pm ' +
+          'JOIN alumnos a ON pm.alumno_id = a.alumno_id ' +
+          'SET ' +
+          '  pm.comprobante_url = COALESCE(NULLIF(pm.comprobante_url, ""), a.comprobante_pago_url), ' +
+          '  pm.numero_operacion = COALESCE(NULLIF(pm.numero_operacion, ""), a.numero_operacion) ' +
+          'WHERE (pm.comprobante_url IS NULL OR pm.comprobante_url = "") ' +
+          '  AND a.comprobante_pago_url IS NOT NULL'
+        );
+      } catch (errSyncComp) {}
       // Migrar unique key para permitir pagos parciales (split por deporte)
       try {
         const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
@@ -2505,6 +2518,8 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     let query =
       'SELECT ' +
       'pm.*, ' +
+      'COALESCE(NULLIF(pm.comprobante_url, ""), a.comprobante_pago_url) as comprobante_url, ' +
+      'COALESCE(NULLIF(pm.numero_operacion, ""), a.numero_operacion) as numero_operacion, ' +
       'a.dni, ' +
       'a.nombres, ' +
       'a.telefono, ' +
@@ -2878,6 +2893,27 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
  * PUT /api/admin/pagos-mensuales/:id/monto
  * Editar manualmente el monto de un pago mensual
  */
+/**
+ * PUT /api/admin/pagos-mensuales/:id/comprobante
+ * Actualizar comprobante o número de operación de un pago mensual
+ */
+app.put('/api/admin/pagos-mensuales/:id/comprobante', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comprobante_url, numero_operacion } = req.body;
+
+    await db.query(
+      'UPDATE pagos_mensuales SET comprobante_url = COALESCE(?, comprobante_url), numero_operacion = COALESCE(?, numero_operacion) WHERE pago_id = ?',
+      [comprobante_url || null, numero_operacion || null, id]
+    );
+
+    res.json({ success: true, mensaje: 'Comprobante actualizado correctamente' });
+  } catch (error) {
+    console.error('❌ Error al actualizar comprobante mensual:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.put('/api/admin/pagos-mensuales/:id/monto', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -3730,8 +3766,6 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
 
     // Construir respuesta con valores seguros (evitar null)
     const resumen = resumenGeneral[0];
-    const mesData = ingresosMes[0];
-    const hoyData = ingresosHoy[0];
 
     const estadisticas = {
       resumen: {
