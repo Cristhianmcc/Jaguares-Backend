@@ -3664,7 +3664,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
     if (filtroMes || filtroAnio || filtroDeporte) {
       const condF = ["pm.estado = 'confirmado'"];
       const paramF = [];
-      if (filtroMes) { condF.push('pm.mes = ?'); paramF.push(filtroMes); }
+      if (filtroMes) { condF.push('LOWER(pm.mes) = LOWER(?)'); paramF.push(filtroMes); }
       if (filtroAnio) { condF.push(`pm.\`${global.COL_ANIO || 'año'}\` = ?`); paramF.push(filtroAnio); }
       let joinDep = '';
       if (filtroDeporte) {
