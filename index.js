@@ -3628,6 +3628,11 @@ app.delete('/api/admin/usuarios/:id', verificarAutenticacion, verificarAdmin, ra
 app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificarAdmin, rateLimiterAdmin, async (req, res) => {
   try {
     // CALCULAR DIRECTAMENTE DESDE MYSQL PARA PRECISIÓN EXACTA
+    // Filtros opcionales: ?mes=Agosto&anio=2026&deporte=Fútbol
+    const filtroMes    = req.query.mes     || null;
+    const filtroAnio   = req.query.anio    ? parseInt(req.query.anio) : null;
+    const filtroDeporte = req.query.deporte || null;
+
     if (!db) {
       throw new Error('Base de datos no disponible');
     }
@@ -3653,6 +3658,43 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       WHERE pm.estado = 'confirmado'
     `);
     const totalMensualidadesReales = parseFloat(totalMensualidadesPM[0]?.total_mensualidades_reales || 0);
+
+    // RESUMEN FILTRADO — solo cuando se envían parámetros de filtro
+    let resumenFiltrado = null;
+    if (filtroMes || filtroAnio || filtroDeporte) {
+      const condF = ["pm.estado = 'confirmado'"];
+      const paramF = [];
+      if (filtroMes) { condF.push('pm.mes = ?'); paramF.push(filtroMes); }
+      if (filtroAnio) { condF.push(`pm.\`${global.COL_ANIO || 'año'}\` = ?`); paramF.push(filtroAnio); }
+      let joinDep = '';
+      if (filtroDeporte) {
+        joinDep = `
+          LEFT JOIN alumnos a_f    ON pm.alumno_id = a_f.alumno_id
+          LEFT JOIN inscripciones i_f ON i_f.alumno_id = a_f.alumno_id AND i_f.estado = 'activa'
+          LEFT JOIN deportes d_f    ON i_f.deporte_id = d_f.deporte_id`;
+        condF.push('d_f.nombre = ?');
+        paramF.push(filtroDeporte);
+      }
+      try {
+        const [fRes] = await db.query(`
+          SELECT
+            COALESCE(SUM(pm.monto), 0)        as total_monto,
+            COUNT(DISTINCT pm.pago_id)         as cantidad_pagos,
+            COUNT(DISTINCT pm.alumno_id)       as cantidad_alumnos
+          FROM pagos_mensuales pm
+          ${joinDep}
+          WHERE ${condF.join(' AND ')}
+        `, paramF);
+        resumenFiltrado = {
+          totalMonto:       parseFloat(fRes[0]?.total_monto      || 0),
+          cantidadPagos:    parseInt(fRes[0]?.cantidad_pagos    || 0),
+          cantidadAlumnos:  parseInt(fRes[0]?.cantidad_alumnos  || 0),
+          filtros: { mes: filtroMes, anio: filtroAnio, deporte: filtroDeporte }
+        };
+      } catch (eF) {
+        console.warn('⚠️ Error en resumenFiltrado:', eF.message);
+      }
+    }
 
     // 2. INGRESOS DEL MES ACTUAL - Combina mensualidades confirmadas en pagos_mensuales y nuevas inscripciones
     const colYear = global.COL_ANIO || 'año';
@@ -3796,6 +3838,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
         mensualidades: parseFloat(d.mensualidades) || 0,
         total: parseFloat(d.total) || 0
       })),
+      resumenFiltrado,
       desgloseMensual: desgloseMensual || [],
       porAlumno: porAlumno.map(a => ({
         dni: a.dni,
