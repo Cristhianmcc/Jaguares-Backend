@@ -3646,6 +3646,14 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       WHERE i.estado = 'activa'
     `);
 
+    // Total mensualidades reales cobradas: suma de todos los pagos_mensuales confirmados
+    const [totalMensualidadesPM] = await db.query(`
+      SELECT COALESCE(SUM(pm.monto), 0) as total_mensualidades_reales
+      FROM pagos_mensuales pm
+      WHERE pm.estado = 'confirmado'
+    `);
+    const totalMensualidadesReales = parseFloat(totalMensualidadesPM[0]?.total_mensualidades_reales || 0);
+
     // 2. INGRESOS DEL MES ACTUAL - Combina mensualidades confirmadas en pagos_mensuales y nuevas inscripciones
     const colYear = global.COL_ANIO || 'año';
     const [mesPagosMensuales] = await db.query(`
@@ -3776,8 +3784,8 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
         totalAlumnosActivos: parseInt(resumen.total_alumnos_activos) || 0,
         totalInscripcionesActivas: parseInt(resumen.total_inscripciones_activas) || 0,
         totalMatriculas: parseFloat(resumen.total_matriculas) || 0,
-        totalMensualidades: parseFloat(resumen.total_mensualidades) || 0,
-        totalIngresosActivos: parseFloat(resumen.total_ingresos) || 0,
+        totalMensualidades: totalMensualidadesReales,
+        totalIngresosActivos: (parseFloat(resumen.total_matriculas) || 0) + totalMensualidadesReales,
         ingresosMes: totalMatriculasMes + totalMensualidadesMes,
         ingresosHoy: totalMatriculasHoy + totalMensualidadesHoy
       },
