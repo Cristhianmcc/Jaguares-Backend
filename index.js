@@ -35,7 +35,7 @@ const __dirname = path.dirname(__filename);
 // Cargar variables de entorno desd .env
 config({ path: path.join(__dirname, '.env') });
 
-// ==================== CONFIGURACIÓN MYSQL ====================
+// ==================== CONFIGURACIÃ“N MYSQL ====================
 
 // Pool de conexiones MySQL
 const dbConfig = {
@@ -55,34 +55,34 @@ let db;
 async function initDatabase() {
   try {
     db = await mysql.createPool(dbConfig);
-    // Garantizar utf8mb4 en CADA conexión del pool
+    // Garantizar utf8mb4 en CADA conexiÃ³n del pool
     db.pool.on('connection', (conn) => {
       conn.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
     });
-    // Test de conexión
+    // Test de conexiÃ³n
     const connection = await db.getConnection();
     await connection.query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
-    console.log('✅ Conexión a MySQL establecida correctamente (utf8mb4)');
+    console.log('âœ… ConexiÃ³n a MySQL establecida correctamente (utf8mb4)');
     
-    // Establecer nombre de columna "año" con valor seguro por defecto ANTES de intentar detectarlo.
-    // Usamos unicode escape ('a\u00f1o' = 'año') para evitar problemas de encoding en el archivo fuente.
+    // Establecer nombre de columna "aÃ±o" con valor seguro por defecto ANTES de intentar detectarlo.
+    // Usamos unicode escape ('a\u00f1o' = 'aÃ±o') para evitar problemas de encoding en el archivo fuente.
     global.COL_ANIO = 'a\u00f1o';
 
-    // Intentar detectar el nombre real de la columna desde la BD (puede ser 'año' o 'anio')
+    // Intentar detectar el nombre real de la columna desde la BD (puede ser 'aÃ±o' o 'anio')
     try {
       const [cols] = await connection.query('SHOW COLUMNS FROM pagos_mensuales');
 
-      // Buscar EXPLÍCITAMENTE por nombre: primero 'año', luego 'anio' (más seguro que buscar por tipo)
+      // Buscar EXPLÃCITAMENTE por nombre: primero 'aÃ±o', luego 'anio' (mÃ¡s seguro que buscar por tipo)
       const yearCol = cols.find(c =>
-        c.Field === 'a\u00f1o' || // columna con ñ (lo más común)
-        c.Field === 'anio'         // columna sin ñ (fallback alternativo)
+        c.Field === 'a\u00f1o' || // columna con Ã± (lo mÃ¡s comÃºn)
+        c.Field === 'anio'         // columna sin Ã± (fallback alternativo)
       );
 
       if (yearCol) {
         global.COL_ANIO = yearCol.Field;
         console.log('\u2705 Columna a\u00f1o detectada como:', global.COL_ANIO);
       } else {
-        // No se encontró ni 'año' ni 'anio' — mantener el default 'año' ya establecido
+        // No se encontrÃ³ ni 'aÃ±o' ni 'anio' â€” mantener el default 'aÃ±o' ya establecido
         console.warn('\u26a0\ufe0f  Columna a\u00f1o no encontrada por nombre exacto, usando default:', global.COL_ANIO);
         console.warn('   Columnas disponibles:', cols.map(c => c.Field).join(', '));
       }
@@ -91,10 +91,10 @@ async function initDatabase() {
       try {
         const [resSet] = await connection.query("UPDATE pagos_mensuales SET mes = 'septiembre' WHERE LOWER(mes) = 'setiembre'");
         if (resSet.changedRows > 0) {
-          console.log(`✅ ${resSet.changedRows} pagos_mensuales normalizados de 'setiembre' a 'septiembre'`);
+          console.log(`âœ… ${resSet.changedRows} pagos_mensuales normalizados de 'setiembre' a 'septiembre'`);
         }
       } catch (errSet) {
-        console.warn('⚠️ No se pudo normalizar setiembre en pagos_mensuales:', errSet.message);
+        console.warn('âš ï¸ No se pudo normalizar setiembre en pagos_mensuales:', errSet.message);
       }
 
       // 2. Sincronizar alumnos inscritos en septiembre con pago confirmado que no tengan fila en pagos_mensuales
@@ -123,10 +123,10 @@ async function initDatabase() {
           'GROUP BY a.alumno_id'
         );
         if (resSync.affectedRows > 0) {
-          console.log(`✅ ${resSync.affectedRows} alumnos inscritos en septiembre sincronizados automáticamente a pagos_mensuales como confirmados`);
+          console.log(`âœ… ${resSync.affectedRows} alumnos inscritos en septiembre sincronizados automÃ¡ticamente a pagos_mensuales como confirmados`);
         }
       } catch (errSync) {
-        console.warn('⚠️ No se pudo sincronizar inscritos de septiembre a pagos_mensuales:', errSync.message);
+        console.warn('âš ï¸ No se pudo sincronizar inscritos de septiembre a pagos_mensuales:', errSync.message);
       }
 
       // Agregar columna observaciones si no existe
@@ -141,7 +141,7 @@ async function initDatabase() {
         console.log('\u2705 Columna numero_operacion agregada a pagos_mensuales');
       }
 
-      // Sincronizar comprobantes de alumnos a pagos_mensuales si están vacíos
+      // Sincronizar comprobantes de alumnos a pagos_mensuales si estÃ¡n vacÃ­os
       try {
         await connection.query(
           'UPDATE pagos_mensuales pm ' +
@@ -158,16 +158,16 @@ async function initDatabase() {
         const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
         if (indexes.length > 0) {
           const colAnio = global.COL_ANIO; // ya tiene el valor correcto garantizado
-          // Primero crear índice alternativo para la FK (MySQL lo necesita)
+          // Primero crear Ã­ndice alternativo para la FK (MySQL lo necesita)
           await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_id (alumno_id)');
-          // Ahora sí podemos eliminar el unique
+          // Ahora sÃ­ podemos eliminar el unique
           await connection.query('ALTER TABLE pagos_mensuales DROP INDEX unique_alumno_mes');
           await connection.query('ALTER TABLE pagos_mensuales ADD INDEX idx_alumno_mes (alumno_id, mes, `' + colAnio + '`)');
           console.log('\u2705 Migrado unique_alumno_mes \u2192 idx_alumno_mes (permite pagos parciales)');
         }
       } catch (migErr) { console.warn('\u26a0\ufe0f Migraci\u00f3n unique key:', migErr.message); }
     } catch (e) {
-      // La tabla puede no existir aún en el primer arranque — es esperado
+      // La tabla puede no existir aÃºn en el primer arranque â€” es esperado
       console.warn('\u26a0\ufe0f  No se pudo consultar pagos_mensuales al arrancar:', e.message);
       console.warn('   Se usar\u00e1 el nombre de columna por defecto:', global.COL_ANIO);
     }
@@ -178,14 +178,14 @@ async function initDatabase() {
       const [asistCols] = await connection.query('SHOW COLUMNS FROM asistencias');
       if (!asistCols.find(c => c.Field === 'asistencia_puerta')) {
         await connection.query('ALTER TABLE asistencias ADD COLUMN asistencia_puerta TINYINT(1) DEFAULT 0');
-        console.log('✅ Columna asistencia_puerta agregada a asistencias');
+        console.log('âœ… Columna asistencia_puerta agregada a asistencias');
       }
       if (!asistCols.find(c => c.Field === 'hora_puerta')) {
         await connection.query('ALTER TABLE asistencias ADD COLUMN hora_puerta TIME NULL');
-        console.log('✅ Columna hora_puerta agregada a asistencias');
+        console.log('âœ… Columna hora_puerta agregada a asistencias');
       }
     } catch (errAsist) {
-      console.warn('⚠️ Error al verificar columnas en asistencias:', errAsist.message);
+      console.warn('âš ï¸ Error al verificar columnas en asistencias:', errAsist.message);
     }
 
     // Crear tabla de logs accesos_puerta si no existe
@@ -206,13 +206,13 @@ async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
     } catch (errAcc) {
-      console.warn('⚠️ Error al verificar tabla accesos_puerta:', errAcc.message);
+      console.warn('âš ï¸ Error al verificar tabla accesos_puerta:', errAcc.message);
     }
 
     connection.release();
   } catch (error) {
-    console.error('❌ Error al conectar con MySQL:', error);
-    console.error('⚠️  El servidor continuará sin base de datos (usará Google Sheets)');
+    console.error('âŒ Error al conectar con MySQL:', error);
+    console.error('âš ï¸  El servidor continuarÃ¡ sin base de datos (usarÃ¡ Google Sheets)');
   }
 }
 
@@ -220,34 +220,34 @@ async function initDatabase() {
 initDatabase();
 
 const app = express();
-app.set('trust proxy', 1); // Detrás de Cloudflare/nginx proxy
+app.set('trust proxy', 1); // DetrÃ¡s de Cloudflare/nginx proxy
 const PORT = process.env.PORT || 3002;
 
-// ==================== CONFIGURACIÓN ACADEMIA DEPORTIVA ====================
+// ==================== CONFIGURACIÃ“N ACADEMIA DEPORTIVA ====================
 
 // URL y TOKEN del Apps Script (backend transaccional)
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const APPS_SCRIPT_TOKEN = process.env.APPS_SCRIPT_TOKEN;
 
 if (!APPS_SCRIPT_URL || !APPS_SCRIPT_TOKEN) {
-  console.error('❌ ERROR: Variables de entorno requeridas no configuradas:');
+  console.error('âŒ ERROR: Variables de entorno requeridas no configuradas:');
   console.error('   - APPS_SCRIPT_URL');
   console.error('   - APPS_SCRIPT_TOKEN');
   process.exit(1);
 }
 
-console.log('✅ Apps Script URL configurado:', APPS_SCRIPT_URL);
+console.log('âœ… Apps Script URL configurado:', APPS_SCRIPT_URL);
 
-// ==================== SISTEMA DE CACHÉ MEJORADO ====================
+// ==================== SISTEMA DE CACHÃ‰ MEJORADO ====================
 
-// Crear instancia de caché con node-cache (más robusto que Map)
+// Crear instancia de cachÃ© con node-cache (mÃ¡s robusto que Map)
 const cache = new NodeCache({
     stdTTL: 300,      // TTL por defecto: 5 minutos
-    checkperiod: 60,  // Revisar expiración cada 60 segundos
+    checkperiod: 60,  // Revisar expiraciÃ³n cada 60 segundos
     useClones: false  // No clonar objetos (mejor performance)
 });
 
-// TTLs específicos por tipo de dato (en segundos)
+// TTLs especÃ­ficos por tipo de dato (en segundos)
 const CACHE_TTL = {
     horarios: 300,        // 5 minutos
     inscripciones: 120,   // 2 minutos
@@ -257,23 +257,23 @@ const CACHE_TTL = {
 };
 
 /**
- * Genera clave de caché única
+ * Genera clave de cachÃ© Ãºnica
  */
 function getCacheKey(tipo, id = '') {
     return id ? `${tipo}_${id}` : tipo;
 }
 
 /**
- * Invalida caché de un DNI específico (inscripciones + consultas)
+ * Invalida cachÃ© de un DNI especÃ­fico (inscripciones + consultas)
  */
 function invalidateDNICache(dni) {
     cache.del(getCacheKey('inscripciones', dni));
     cache.del(getCacheKey('consultas', dni));
-    console.log(`🗑️ CACHÉ INVALIDADO para DNI ${dni}`);
+    console.log(`ðŸ—‘ï¸ CACHÃ‰ INVALIDADO para DNI ${dni}`);
 }
 
 /**
- * Obtiene estadísticas del caché
+ * Obtiene estadÃ­sticas del cachÃ©
  */
 function getCacheStats() {
     const stats = cache.getStats();
@@ -294,7 +294,7 @@ app.use(helmetConfig);
 // CORS restringido a dominios permitidos
 app.use(cors(corsOptions));
 
-// Body parser con límite
+// Body parser con lÃ­mite
 app.use(express.json({ limit: '10mb' }));
 
 // Sanitizar inputs para prevenir XSS
@@ -306,18 +306,18 @@ app.use(rateLimiterGeneral);
 // ==================== ENDPOINTS UTILIDAD ====================
 
 /**
- * Limpiar caché manualmente
+ * Limpiar cachÃ© manualmente
  */
 app.post('/api/cache/clear', (req, res) => {
   try {
     cache.flushAll();
-    console.log('🗑️ CACHÉ LIMPIADO MANUALMENTE');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ LIMPIADO MANUALMENTE');
     res.json({
       success: true,
-      mensaje: 'Caché limpiado correctamente'
+      mensaje: 'CachÃ© limpiado correctamente'
     });
   } catch (error) {
-    console.error('❌ Error al limpiar caché:', error);
+    console.error('âŒ Error al limpiar cachÃ©:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -326,7 +326,7 @@ app.post('/api/cache/clear', (req, res) => {
 });
 
 /**
- * DEBUG: Ver datos exactos de horarios sin caché
+ * DEBUG: Ver datos exactos de horarios sin cachÃ©
  */
 app.get('/api/debug/horarios', async (req, res) => {
   try {
@@ -358,41 +358,41 @@ app.get('/api/debug/horarios', async (req, res) => {
       horarios: results
     });
   } catch (error) {
-    console.error('❌ Error en debug:', error);
+    console.error('âŒ Error en debug:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ==================== ENDPOINTS ACADEMIA DEPORTIVA ====================
 
-// Endpoint para obtener horarios disponibles (CON CACHÉ y filtrado por edad)
+// Endpoint para obtener horarios disponibles (CON CACHÃ‰ y filtrado por edad)
 app.get('/api/horarios', async (req, res) => {
   try {
     const anioNacimiento = req.query.anio_nacimiento || req.query.ano_nacimiento;
     const forceRefresh = req.query.refresh === 'true';
     
-    // Clave de caché diferente si hay filtro de edad
+    // Clave de cachÃ© diferente si hay filtro de edad
     const cacheKey = getCacheKey('horarios', anioNacimiento || 'all');
     
-    // Intentar obtener del caché (si no se fuerza refresh)
+    // Intentar obtener del cachÃ© (si no se fuerza refresh)
     if (!forceRefresh) {
       const cachedData = cache.get(cacheKey);
       if (cachedData) {
-        console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
+        console.log(`âš¡ CACHÃ‰ HIT: ${cacheKey}`);
         return res.json(cachedData);
       }
     } else {
-      console.log(`🔄 FORCE REFRESH - Ignorando caché`);
+      console.log(`ðŸ”„ FORCE REFRESH - Ignorando cachÃ©`);
     }
     
-    console.log(`🌐 CACHÉ MISS: ${cacheKey} - Consultando MySQL`);
+    console.log(`ðŸŒ CACHÃ‰ MISS: ${cacheKey} - Consultando MySQL`);
     
     // ==================== CONSULTA DESDE MYSQL ====================
     if (db) {
       try {
-        console.log('🔍 Intentando consultar MySQL...');
+        console.log('ðŸ” Intentando consultar MySQL...');
         if (anioNacimiento) {
-          console.log(`🎯 Filtrando por anio de nacimiento: ${anioNacimiento}`);
+          console.log(`ðŸŽ¯ Filtrando por anio de nacimiento: ${anioNacimiento}`);
         }
         
         // Construir query con filtro opcional por edad
@@ -422,7 +422,7 @@ app.get('/api/horarios', async (req, res) => {
         const params = [];
         
         // Agregar filtro por edad si se proporciona anio de nacimiento
-        // IMPORTANTE: Si ano_min o ano_max son NULL/0, el horario se muestra para TODOS (sin restricción de edad)
+        // IMPORTANTE: Si ano_min o ano_max son NULL/0, el horario se muestra para TODOS (sin restricciÃ³n de edad)
         if (anioNacimiento) {
           query += ` AND (h.ano_min IS NULL OR h.ano_max IS NULL OR h.ano_min = 0 OR h.ano_max = 0 OR ? BETWEEN h.ano_min AND h.ano_max)`;
           params.push(parseInt(anioNacimiento));
@@ -430,20 +430,20 @@ app.get('/api/horarios', async (req, res) => {
         
         query += ` ORDER BY d.nombre, h.dia, h.hora_inicio`;
         
-        console.log('📝 Query preparada:', query);
-        console.log('📊 Parámetros:', params);
+        console.log('ðŸ“ Query preparada:', query);
+        console.log('ðŸ“Š ParÃ¡metros:', params);
         
         const [rows] = params.length > 0 
           ? await db.execute(query, params)
           : await db.execute(query);
         
-        console.log(`✅ Horarios obtenidos de MySQL: ${rows.length}`);
+        console.log(`âœ… Horarios obtenidos de MySQL: ${rows.length}`);
         if (anioNacimiento) {
           console.log(`   (filtrados para anio ${anioNacimiento})`);
           // Log de primeros 5 horarios para debug
-          console.log('📋 Primeros horarios devueltos:');
+          console.log('ðŸ“‹ Primeros horarios devueltos:');
           rows.slice(0, 5).forEach(h => {
-            console.log(`   ID ${h.horario_id}: ${h.deporte} - ${h.dia} ${h.hora_inicio} - Categoría: "${h.categoria}" (${h.ano_min}-${h.ano_max})`);
+            console.log(`   ID ${h.horario_id}: ${h.deporte} - ${h.dia} ${h.hora_inicio} - CategorÃ­a: "${h.categoria}" (${h.ano_min}-${h.ano_max})`);
           });
         }
         
@@ -456,59 +456,59 @@ app.get('/api/horarios', async (req, res) => {
           source: 'mysql'
         };
         
-        // Guardar en caché
+        // Guardar en cachÃ©
         cache.set(cacheKey, data, CACHE_TTL.horarios);
-        console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.horarios}s)`);
+        console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.horarios}s)`);
         
         return res.json(data);
         
       } catch (mysqlError) {
-        console.error('❌ Error en consulta MySQL:', mysqlError);
-        console.log('⚠️  Intentando con Google Sheets como respaldo...');
+        console.error('âŒ Error en consulta MySQL:', mysqlError);
+        console.log('âš ï¸  Intentando con Google Sheets como respaldo...');
         // Si falla MySQL, continuar con Google Sheets abajo
       }
     }
     
     // ==================== GOOGLE SHEETS (COMENTADO - RESPALDO) ====================
     /*
-    // Si no está en caché, obtener de Apps Script
+    // Si no estÃ¡ en cachÃ©, obtener de Apps Script
     let url = `${APPS_SCRIPT_URL}?action=horarios&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
     
-    // Agregar parámetro de anio si existe
+    // Agregar parÃ¡metro de anio si existe
     if (anioNacimiento) {
       url += `&anio_nacimiento=${encodeURIComponent(anioNacimiento)}`;
-      console.log(`🎯 Solicitando horarios filtrados para anio ${anioNacimiento}`);
+      console.log(`ðŸŽ¯ Solicitando horarios filtrados para anio ${anioNacimiento}`);
     }
     
-    console.log('📡 URL COMPLETA que se enviará a Apps Script:');
+    console.log('ðŸ“¡ URL COMPLETA que se enviarÃ¡ a Apps Script:');
     console.log(url);
-    console.log('🔑 Token usado:', APPS_SCRIPT_TOKEN);
+    console.log('ðŸ”‘ Token usado:', APPS_SCRIPT_TOKEN);
     
     const response = await fetch(url);
     const data = await response.json();
     
-    console.log('📥 RESPUESTA de Apps Script:', JSON.stringify(data, null, 2));
+    console.log('ðŸ“¥ RESPUESTA de Apps Script:', JSON.stringify(data, null, 2));
     
     if (!response.ok) {
       throw new Error(data.error || 'Error al obtener horarios');
     }
     
-    // Guardar en caché (node-cache usa segundos)
+    // Guardar en cachÃ© (node-cache usa segundos)
     cache.set(cacheKey, data, CACHE_TTL.horarios);
-    console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.horarios}s, total: ${data.horarios?.length || 0} horarios)`);
+    console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.horarios}s, total: ${data.horarios?.length || 0} horarios)`);
     
     res.json(data);
     */
     
-    // Si llegamos aquí sin MySQL, retornar error
+    // Si llegamos aquÃ­ sin MySQL, retornar error
     return res.status(503).json({
       success: false,
       error: 'Base de datos no disponible',
-      message: 'No se pudo conectar a MySQL y Google Sheets está deshabilitado'
+      message: 'No se pudo conectar a MySQL y Google Sheets estÃ¡ deshabilitado'
     });
     
   } catch (error) {
-    console.error('❌ Error al obtener horarios:', error);
+    console.error('âŒ Error al obtener horarios:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al obtener horarios' 
@@ -516,26 +516,26 @@ app.get('/api/horarios', async (req, res) => {
   }
 });
 
-// Endpoint para inscribir a múltiples horarios
+// Endpoint para inscribir a mÃºltiples horarios
 app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) => {
   try {
     const { alumno, horarios, comprobante } = req.body;
     
-    console.log('📝 ==================== INSCRIPCIÓN MÚLTIPLE ====================');
-    console.log('👤 ALUMNO:', JSON.stringify(alumno, null, 2));
-    console.log('📅 HORARIOS (cantidad):', horarios.length);
-    console.log('📋 HORARIOS DETALLE:', horarios.map(h => ({ 
+    console.log('ðŸ“ ==================== INSCRIPCIÃ“N MÃšLTIPLE ====================');
+    console.log('ðŸ‘¤ ALUMNO:', JSON.stringify(alumno, null, 2));
+    console.log('ðŸ“… HORARIOS (cantidad):', horarios.length);
+    console.log('ðŸ“‹ HORARIOS DETALLE:', horarios.map(h => ({ 
       horario_id: h.horario_id, 
       deporte: h.deporte, 
       dia: h.dia, 
       hora: h.hora_inicio 
     })));
     
-    // Validaciones básicas
+    // Validaciones bÃ¡sicas
     if (!alumno || !horarios || !Array.isArray(horarios)) {
       return res.status(400).json({
         success: false,
-        error: 'Datos inválidos. Se requiere alumno y horarios (array)'
+        error: 'Datos invÃ¡lidos. Se requiere alumno y horarios (array)'
       });
     }
     
@@ -546,37 +546,37 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       });
     }
     
-    // ⚠️ NUEVO: Limitar a máximo 10 horarios para prevenir abuso
+    // âš ï¸ NUEVO: Limitar a mÃ¡ximo 10 horarios para prevenir abuso
     if (horarios.length > 10) {
       return res.status(400).json({
         success: false,
-        error: 'Máximo 10 horarios por inscripción',
-        message: 'Por favor, seleccione máximo 10 horarios. Si necesita más, contacte al administrador.'
+        error: 'MÃ¡ximo 10 horarios por inscripciÃ³n',
+        message: 'Por favor, seleccione mÃ¡ximo 10 horarios. Si necesita mÃ¡s, contacte al administrador.'
       });
     }
     
-    // ⚠️ Validar que el comprobante de pago sea obligatorio
+    // âš ï¸ Validar que el comprobante de pago sea obligatorio
     if (!comprobante) {
       return res.status(400).json({
         success: false,
         error: 'Comprobante de pago requerido',
-        message: 'Debes subir el comprobante de pago con el número de operación para completar la inscripción.'
+        message: 'Debes subir el comprobante de pago con el nÃºmero de operaciÃ³n para completar la inscripciÃ³n.'
       });
     }
 
-    // ⚠️ Validar que si viene comprobante tenga número de operación (obligatorio)
+    // âš ï¸ Validar que si viene comprobante tenga nÃºmero de operaciÃ³n (obligatorio)
     if (comprobante && !comprobante.numero_operacion?.trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Número de operación requerido',
-        message: 'Debes ingresar el número de operación de tu comprobante de pago.'
+        error: 'NÃºmero de operaciÃ³n requerido',
+        message: 'Debes ingresar el nÃºmero de operaciÃ³n de tu comprobante de pago.'
       });
     }
 
-    // ⚠️ Validar número de operación duplicado (anti-fraude: evitar pasar el mismo pago)
+    // âš ï¸ Validar nÃºmero de operaciÃ³n duplicado (anti-fraude: evitar pasar el mismo pago)
     if (comprobante && comprobante.numero_operacion && db) {
       const numOp = comprobante.numero_operacion.trim();
-      // No validar duplicados para valores genéricos como "-"
+      // No validar duplicados para valores genÃ©ricos como "-"
       if (numOp && numOp !== '-') {
         const [existentes] = await db.query(
           `SELECT a.dni, a.nombres, a.apellido_paterno 
@@ -586,11 +586,11 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         );
         if (existentes.length > 0) {
           const otro = existentes[0];
-          console.warn(`⚠️ DUPLICADO DE PAGO: Nro operación "${numOp}" ya usado por ${otro.nombres} ${otro.apellido_paterno} (DNI: ${otro.dni})`);
+          console.warn(`âš ï¸ DUPLICADO DE PAGO: Nro operaciÃ³n "${numOp}" ya usado por ${otro.nombres} ${otro.apellido_paterno} (DNI: ${otro.dni})`);
           return res.status(409).json({
             success: false,
-            error: 'Número de operación duplicado',
-            message: `Este número de operación ya fue registrado por otro alumno (DNI: ${otro.dni.substring(0, 4)}****). Si crees que es un error, contacta al administrador.`
+            error: 'NÃºmero de operaciÃ³n duplicado',
+            message: `Este nÃºmero de operaciÃ³n ya fue registrado por otro alumno (DNI: ${otro.dni.substring(0, 4)}****). Si crees que es un error, contacta al administrador.`
           });
         }
       }
@@ -604,7 +604,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       const conn = await db.getConnection();
       try {
         await conn.beginTransaction();
-        console.log('💾 Guardando inscripción en MySQL (transacción)...');
+        console.log('ðŸ’¾ Guardando inscripciÃ³n en MySQL (transacciÃ³n)...');
         
         // 1. Verificar o crear alumno
         const [alumnoRows] = await conn.query(
@@ -618,7 +618,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         
         if (alumnoRows.length > 0) {
           alumnoId = alumnoRows[0].alumno_id;
-          console.log(`✅ Alumno encontrado en MySQL: ID ${alumnoId}`);
+          console.log(`âœ… Alumno encontrado en MySQL: ID ${alumnoId}`);
           // Traer datos reales de la BD para retornarlos en la respuesta
           const [alumnoReal] = await conn.query(
             'SELECT nombres, apellido_paterno, apellido_materno FROM alumnos WHERE alumno_id = ?',
@@ -626,7 +626,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           );
           if (alumnoReal.length > 0) alumnoDBData = alumnoReal[0];
         } else {
-          // Crear nuevo alumno (dentro de la transacción — se revierte si algo falla)
+          // Crear nuevo alumno (dentro de la transacciÃ³n â€” se revierte si algo falla)
           alumnoCreado = true;
           const fechaNacimiento = alumno.fecha_nacimiento || '2010-01-01';
           
@@ -653,19 +653,19 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             ]
           );
           alumnoId = insertResult.insertId;
-          console.log(`✅ Alumno creado en MySQL: ID ${alumnoId}`);
+          console.log(`âœ… Alumno creado en MySQL: ID ${alumnoId}`);
         }
         
         // 2. Validar que todos los horarios tengan horario_id
         const horariosInvalidos = horarios.filter(h => !h.horario_id);
         if (horariosInvalidos.length > 0) {
-          console.error('❌ HORARIOS SIN ID:', horariosInvalidos);
+          console.error('âŒ HORARIOS SIN ID:', horariosInvalidos);
           await conn.rollback();
           conn.release();
           return res.status(400).json({
             success: false,
-            error: 'Horarios inválidos',
-            message: 'Todos los horarios deben tener un ID válido. Por favor, seleccione horarios de la lista.',
+            error: 'Horarios invÃ¡lidos',
+            message: 'Todos los horarios deben tener un ID vÃ¡lido. Por favor, seleccione horarios de la lista.',
             horarios_invalidos: horariosInvalidos.length
           });
         }
@@ -673,36 +673,36 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         // 3. Agrupar horarios por deporte
         const deportesMap = {};
         horarios.forEach(h => {
-          const deporte = h.deporte || 'Fútbol';
+          const deporte = h.deporte || 'FÃºtbol';
           if (!deportesMap[deporte]) {
             deportesMap[deporte] = {
               horarios: [],
-              plan: h.plan || 'Económico'
+              plan: h.plan || 'EconÃ³mico'
             };
           }
           deportesMap[deporte].horarios.push(h);
         });
         
-        // Función para calcular precio
+        // FunciÃ³n para calcular precio
         const calcularPrecio = (cantidadDias, plan, deporte) => {
           // MAMAS FIT: precio fijo S/.60
           if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
           
-          // Baby Fútbol: 1d=50, 2d=100, 3d=150
-          if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+          // Baby FÃºtbol: 1d=50, 2d=100, 3d=150
+          if (plan === 'Baby FÃºtbol' || deporte === 'Baby FÃºtbol') {
             if (cantidadDias === 1) return 50;
             if (cantidadDias === 2) return 100;
             if (cantidadDias >= 3) return 150;
             return 50;
           }
           
-          if (plan === 'Económico') {
+          if (plan === 'EconÃ³mico') {
             if (cantidadDias === 2) return 60;
             if (cantidadDias >= 3) return 80;
             return 60;
           }
           
-          if (plan === 'Estándar') {
+          if (plan === 'EstÃ¡ndar') {
             if (cantidadDias === 1) return 40;
             if (cantidadDias === 2) return 80;
             if (cantidadDias >= 3) return 120;
@@ -718,7 +718,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           return 60;
         };
         
-        // 3. Generar código de operación único (mismo formato que Apps Script)
+        // 3. Generar cÃ³digo de operaciÃ³n Ãºnico (mismo formato que Apps Script)
         const fecha = new Date();
         const yyyymmdd = fecha.getFullYear().toString() + 
                          (fecha.getMonth() + 1).toString().padStart(2, '0') + 
@@ -726,9 +726,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         const random = Math.random().toString(36).substring(2, 7).toUpperCase();
         codigoOperacion = `ACAD-${yyyymmdd}-${random}`;
         
-        console.log(`📋 Código de Operación Generado: ${codigoOperacion}`);
+        console.log(`ðŸ“‹ CÃ³digo de OperaciÃ³n Generado: ${codigoOperacion}`);
         
-        // Leer config de matrícula: si matricula_activa=false no se cobra matrícula
+        // Leer config de matrÃ­cula: si matricula_activa=false no se cobra matrÃ­cula
         let matriculaActivaVal = 1; // por defecto se cobra
         try {
           const [configRows] = await conn.query(
@@ -739,14 +739,14 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             matriculaActivaVal = (v === 'true' || v === true || v === 1 || v === '1') ? 1 : 0;
           }
         } catch (e) {
-          console.warn('⚠️ No se pudo leer config matricula_activa, asumiendo activa:', e.message);
+          console.warn('âš ï¸ No se pudo leer config matricula_activa, asumiendo activa:', e.message);
         }
-        console.log(`💳 matricula_activa = ${matriculaActivaVal === 1 ? 'SÍ se cobra' : 'NO se cobra'}`);
+        console.log(`ðŸ’³ matricula_activa = ${matriculaActivaVal === 1 ? 'SÃ se cobra' : 'NO se cobra'}`);
         
         // 4. Guardar inscripciones
         
-        // ♻️ LIMPIAR PENDIENTES PREVIAS: Si el alumno ya tenía inscripciones pendientes
-        // (ej: el usuario volvió atrás desde la confirmación para editar), las eliminamos
+        // â™»ï¸ LIMPIAR PENDIENTES PREVIAS: Si el alumno ya tenÃ­a inscripciones pendientes
+        // (ej: el usuario volviÃ³ atrÃ¡s desde la confirmaciÃ³n para editar), las eliminamos
         // para que pueda re-confirmar sin error. Solo bloqueamos las 'activas'.
         const [pendientesExistentes] = await conn.query(
           `SELECT inscripcion_id FROM inscripciones WHERE alumno_id = ? AND estado = 'pendiente'`,
@@ -754,7 +754,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         );
         if (pendientesExistentes.length > 0) {
           const idsPendientes = pendientesExistentes.map(r => r.inscripcion_id);
-          console.log(`♻️ Eliminando ${idsPendientes.length} inscripción(es) pendiente(s) previas del alumno ${alumnoId}: [${idsPendientes.join(', ')}]`);
+          console.log(`â™»ï¸ Eliminando ${idsPendientes.length} inscripciÃ³n(es) pendiente(s) previas del alumno ${alumnoId}: [${idsPendientes.join(', ')}]`);
           // Eliminar horarios asociados primero (FK)
           await conn.query(
             `DELETE FROM inscripcion_horarios WHERE inscripcion_id IN (${idsPendientes.map(() => '?').join(',')})`,
@@ -767,7 +767,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           );
         }
         
-        // ⚠️ VALIDAR CRUCES DE HORARIO con inscripciones activas existentes
+        // âš ï¸ VALIDAR CRUCES DE HORARIO con inscripciones activas existentes
         // Traer todos los horarios activos del alumno
         const [horariosActivos] = await conn.query(`
           SELECT h.horario_id, h.dia, h.hora_inicio, h.hora_fin, d.nombre as deporte
@@ -778,14 +778,14 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           WHERE i.alumno_id = ? AND i.estado = 'activa'
         `, [alumnoId]);
 
-        console.log(`🔍 VALIDACIÓN DE CRUCES: alumnoId=${alumnoId}, horarios activos encontrados: ${horariosActivos.length}`);
+        console.log(`ðŸ” VALIDACIÃ“N DE CRUCES: alumnoId=${alumnoId}, horarios activos encontrados: ${horariosActivos.length}`);
         if (horariosActivos.length > 0) {
-          console.log('📋 Horarios activos:', horariosActivos.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
+          console.log('ðŸ“‹ Horarios activos:', horariosActivos.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
         }
 
         // Traer detalle de los horarios nuevos solicitados
         const idsNuevos = horarios.map(h => h.horario_id).filter(Boolean);
-        console.log(`📋 IDs nuevos a inscribir: [${idsNuevos.join(', ')}]`);
+        console.log(`ðŸ“‹ IDs nuevos a inscribir: [${idsNuevos.join(', ')}]`);
         
         if (idsNuevos.length > 0 && horariosActivos.length > 0) {
           const [horariosNuevosDetalle] = await conn.query(`
@@ -795,19 +795,19 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             WHERE h.horario_id IN (${idsNuevos.map(() => '?').join(',')})
           `, idsNuevos);
 
-          console.log('📋 Horarios nuevos detalle:', horariosNuevosDetalle.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
+          console.log('ðŸ“‹ Horarios nuevos detalle:', horariosNuevosDetalle.map(h => `${h.deporte} ${h.dia} ${h.hora_inicio}-${h.hora_fin}`));
 
           for (const nuevo of horariosNuevosDetalle) {
             for (const existente of horariosActivos) {
               if (nuevo.dia.toUpperCase().trim() === existente.dia.toUpperCase().trim()) {
-                // Normalizar horas a string "HH:MM:SS" para comparación segura
+                // Normalizar horas a string "HH:MM:SS" para comparaciÃ³n segura
                 const nInicio = String(nuevo.hora_inicio).padStart(8, '0');
                 const nFin = String(nuevo.hora_fin).padStart(8, '0');
                 const eInicio = String(existente.hora_inicio).padStart(8, '0');
                 const eFin = String(existente.hora_fin).padStart(8, '0');
-                console.log(`🔍 Comparando: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} vs ${existente.deporte} ${existente.dia} ${eInicio}-${eFin} → cruza=${nInicio < eFin && nFin > eInicio}`);
+                console.log(`ðŸ” Comparando: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} vs ${existente.deporte} ${existente.dia} ${eInicio}-${eFin} â†’ cruza=${nInicio < eFin && nFin > eInicio}`);
                 if (nInicio < eFin && nFin > eInicio) {
-                  console.warn(`❌ CRUCE DE HORARIO DETECTADO: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} se cruza con ${existente.deporte} ${existente.dia} ${eInicio}-${eFin}`);
+                  console.warn(`âŒ CRUCE DE HORARIO DETECTADO: ${nuevo.deporte} ${nuevo.dia} ${nInicio}-${nFin} se cruza con ${existente.deporte} ${existente.dia} ${eInicio}-${eFin}`);
                   await conn.rollback();
                   conn.release();
                   return res.status(409).json({
@@ -823,9 +823,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
 
         const inscripcionesIds = [];
         for (const [nombreDeporte, info] of Object.entries(deportesMap)) {
-          // ⚠️ IMPORTANTE: Usar coincidencia EXACTA (=) en vez de LIKE.
-          // LIKE '%Fútbol%' con índice sobre 'nombre' y colación utf8mb4_unicode_ci
-          // (insensible a acentos) devuelve "Baby Futbol" antes que "Fútbol" alfabéticamente,
+          // âš ï¸ IMPORTANTE: Usar coincidencia EXACTA (=) en vez de LIKE.
+          // LIKE '%FÃºtbol%' con Ã­ndice sobre 'nombre' y colaciÃ³n utf8mb4_unicode_ci
+          // (insensible a acentos) devuelve "Baby Futbol" antes que "FÃºtbol" alfabÃ©ticamente,
           // asignando el deporte_id incorrecto a todas las inscripciones.
           const [deporteRows] = await conn.query(
             'SELECT deporte_id FROM deportes WHERE nombre = ?',
@@ -833,7 +833,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           );
           
           if (deporteRows.length === 0) {
-            console.warn(`⚠️ Deporte no encontrado (exacto): ${nombreDeporte}`);
+            console.warn(`âš ï¸ Deporte no encontrado (exacto): ${nombreDeporte}`);
             continue;
           }
           
@@ -842,7 +842,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           const cantidadDias = info.horarios.length;
           const precioMensual = calcularPrecio(cantidadDias, plan, nombreDeporte);
           
-          // ⚠️ VALIDACIÓN: Solo bloquear si ya existe inscripción ACTIVA (no pendiente, esas ya se limpiaron)
+          // âš ï¸ VALIDACIÃ“N: Solo bloquear si ya existe inscripciÃ³n ACTIVA (no pendiente, esas ya se limpiaron)
           const [inscripcionActiva] = await conn.query(
             `SELECT inscripcion_id, estado, plan, precio_mensual 
              FROM inscripciones 
@@ -853,13 +853,13 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           
           if (inscripcionActiva.length > 0) {
             const inscExist = inscripcionActiva[0];
-            console.warn(`⚠️ DUPLICADO ACTIVO: Alumno ${alumnoId} ya tiene inscripción ACTIVA en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
+            console.warn(`âš ï¸ DUPLICADO ACTIVO: Alumno ${alumnoId} ya tiene inscripciÃ³n ACTIVA en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
             await conn.rollback();
             conn.release();
             return res.status(409).json({
               success: false,
-              error: 'Inscripción duplicada',
-              message: `Ya tienes una inscripción activa en ${nombreDeporte}. No puedes inscribirte dos veces en el mismo deporte.`,
+              error: 'InscripciÃ³n duplicada',
+              message: `Ya tienes una inscripciÃ³n activa en ${nombreDeporte}. No puedes inscribirte dos veces en el mismo deporte.`,
               deporte: nombreDeporte,
               inscripcion_existente: {
                 id: inscExist.inscripcion_id,
@@ -882,7 +882,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             horarios: info.horarios 
           });
           
-          console.log(`✅ Inscripción: ${nombreDeporte} - ${plan} - S/.${precioMensual}`);
+          console.log(`âœ… InscripciÃ³n: ${nombreDeporte} - ${plan} - S/.${precioMensual}`);
         }
         
         // 4. Guardar horarios en tabla intermedia
@@ -897,28 +897,28 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                   [inscripcionId, horario.horario_id]
                 );
                 horariosGuardados++;
-                console.log(`✅ Horario guardado: Inscripción ${inscripcionId} -> Horario ${horario.horario_id}`);
+                console.log(`âœ… Horario guardado: InscripciÃ³n ${inscripcionId} -> Horario ${horario.horario_id}`);
               } catch (horarioError) {
-                // Si falla un horario individual, toda la transacción debe revertirse
+                // Si falla un horario individual, toda la transacciÃ³n debe revertirse
                 throw horarioError;
               }
             } else {
-              console.error(`❌ Horario sin ID para inscripción ${inscripcionId}:`, horario);
+              console.error(`âŒ Horario sin ID para inscripciÃ³n ${inscripcionId}:`, horario);
             }
           }
         }
         
-        console.log(`✅ Total horarios guardados: ${horariosGuardados} de ${horarios.length}`);
+        console.log(`âœ… Total horarios guardados: ${horariosGuardados} de ${horarios.length}`);
         
         if (horariosGuardados === 0) {
-          console.error('⚠️ ADVERTENCIA: No se guardó ningún horario');
+          console.error('âš ï¸ ADVERTENCIA: No se guardÃ³ ningÃºn horario');
         }
         
-        // Todo salió bien → confirmar la transacción (alumno + inscripciones + horarios)
+        // Todo saliÃ³ bien â†’ confirmar la transacciÃ³n (alumno + inscripciones + horarios)
         await conn.commit();
         conn.release();
 
-        // Guardar número de operación en tabla alumnos si viene con comprobante
+        // Guardar nÃºmero de operaciÃ³n en tabla alumnos si viene con comprobante
         if (comprobante && comprobante.numero_operacion) {
           const numOp = comprobante.numero_operacion.trim();
           if (numOp) {
@@ -927,9 +927,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                 `UPDATE alumnos SET numero_operacion = ?, updated_at = NOW() WHERE alumno_id = ?`,
                 [numOp, alumnoId]
               );
-              console.log(`✅ Número de operación guardado: ${numOp}`);
+              console.log(`âœ… NÃºmero de operaciÃ³n guardado: ${numOp}`);
             } catch (numOpErr) {
-              console.error('❌ Error guardando número de operación:', numOpErr.message);
+              console.error('âŒ Error guardando nÃºmero de operaciÃ³n:', numOpErr.message);
             }
           }
         }
@@ -942,26 +942,26 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           success: true
         };
         
-        console.log('✅ INSCRIPCIÓN GUARDADA EN MYSQL');
+        console.log('âœ… INSCRIPCIÃ“N GUARDADA EN MYSQL');
       } catch (mysqlError) {
         // Revertir TODOS los cambios: alumno, inscripciones y horarios quedan como si nada
         try { await conn.rollback(); } catch (_) {}
         conn.release();
 
-        console.error('❌ Error MySQL:', mysqlError);
-        // Construir mensaje orientativo según el código MySQL
-        let mensajeUsuario = 'No se pudo completar la inscripción. Por favor intente nuevamente.';
+        console.error('âŒ Error MySQL:', mysqlError);
+        // Construir mensaje orientativo segÃºn el cÃ³digo MySQL
+        let mensajeUsuario = 'No se pudo completar la inscripciÃ³n. Por favor intente nuevamente.';
         let codigoError = mysqlError.code || 'UNKNOWN';
         if (codigoError === 'ER_DUP_ENTRY') {
-          mensajeUsuario = 'El alumno ya tiene una inscripción registrada para este deporte.';
+          mensajeUsuario = 'El alumno ya tiene una inscripciÃ³n registrada para este deporte.';
         } else if (codigoError === 'ER_NO_REFERENCED_ROW_2') {
-          mensajeUsuario = 'Uno de los horarios seleccionados ya no está disponible. Vuelve y selecciona otro.';
+          mensajeUsuario = 'Uno de los horarios seleccionados ya no estÃ¡ disponible. Vuelve y selecciona otro.';
         } else if (['ECONNRESET', 'PROTOCOL_CONNECTION_LOST', 'ECONNREFUSED'].includes(codigoError)) {
-          mensajeUsuario = 'Conexión con la base de datos interrumpida. Intente nuevamente en unos segundos.';
+          mensajeUsuario = 'ConexiÃ³n con la base de datos interrumpida. Intente nuevamente en unos segundos.';
         }
         return res.status(500).json({
           success: false,
-          error: 'Error al guardar inscripción',
+          error: 'Error al guardar inscripciÃ³n',
           message: mensajeUsuario,
           codigo: codigoError,
           detalles: mysqlError.sqlMessage || mysqlError.message || codigoError
@@ -969,7 +969,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       }
     }
     
-    // INVALIDAR CACHÉ
+    // INVALIDAR CACHÃ‰
     const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(horariosKeys);
@@ -977,10 +977,10 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
     if (alumno.dni) {
       invalidateDNICache(alumno.dni);
     }
-    console.log('🗑️ CACHÉ INVALIDADO');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO');
 
     // ==================== SINCRONIZAR CON APPS SCRIPT EN BACKGROUND CON REINTENTOS ====================
-    // Disparar la sincronización en background sin bloquear la respuesta al usuario
+    // Disparar la sincronizaciÃ³n en background sin bloquear la respuesta al usuario
     setImmediate(() => {
       const payload = {
         token: APPS_SCRIPT_TOKEN,
@@ -990,9 +990,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         horarios
       };
       const payloadStr = JSON.stringify(payload);
-      console.log(`📤 [BG] Enviando a Apps Script - Código: ${codigoOperacion}`);
+      console.log(`ðŸ“¤ [BG] Enviando a Apps Script - CÃ³digo: ${codigoOperacion}`);
       
-      // Función con reintentos automáticos
+      // FunciÃ³n con reintentos automÃ¡ticos
       const sincronizarConReintentos = async (intento = 1, maxIntentos = 3) => {
         try {
           const response = await Promise.race([
@@ -1010,7 +1010,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
         } catch (err) {
           if (intento < maxIntentos) {
             const delayMs = Math.pow(2, intento) * 1000;
-            console.warn(`⚠️ [BG] Intento ${intento}/${maxIntentos} falló - Código: ${codigoOperacion}`);
+            console.warn(`âš ï¸ [BG] Intento ${intento}/${maxIntentos} fallÃ³ - CÃ³digo: ${codigoOperacion}`);
             console.warn(`   Error: ${err.message} - Reintentando en ${delayMs/1000}s...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
             return sincronizarConReintentos(intento + 1, maxIntentos);
@@ -1023,8 +1023,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
       sincronizarConReintentos()
       .then(async (appsScriptResponse) => {
         if (appsScriptResponse.success) {
-          console.log(`✅ [BG] Apps Script exitoso - Código: ${codigoOperacion}`);
-          // Actualizar URLs de documentos si están disponibles
+          console.log(`âœ… [BG] Apps Script exitoso - CÃ³digo: ${codigoOperacion}`);
+          // Actualizar URLs de documentos si estÃ¡n disponibles
           if (appsScriptResponse.urls_documentos && inscripcionData && db) {
             try {
               await db.query(
@@ -1042,20 +1042,20 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                   inscripcionData.alumnoId
                 ]
               );
-              console.log(`✅ [BG] URLs guardadas en MySQL - Código: ${codigoOperacion}`);
+              console.log(`âœ… [BG] URLs guardadas en MySQL - CÃ³digo: ${codigoOperacion}`);
             } catch (e) {
-              console.error(`❌ [BG] Error guardando URLs - Código: ${codigoOperacion}:`, e.message);
+              console.error(`âŒ [BG] Error guardando URLs - CÃ³digo: ${codigoOperacion}:`, e.message);
             }
           } else {
-            console.warn(`⚠️ [BG] Apps Script exitoso pero sin URLs - Código: ${codigoOperacion}`);
+            console.warn(`âš ï¸ [BG] Apps Script exitoso pero sin URLs - CÃ³digo: ${codigoOperacion}`);
           }
           
-          // ====== SUBIR COMPROBANTE DESPUÉS DE QUE LA INSCRIPCIÓN SE SINCRONIZÓ ======
-          // Esto evita race condition: carpeta ya existe + PAGOS ya tiene el código
+          // ====== SUBIR COMPROBANTE DESPUÃ‰S DE QUE LA INSCRIPCIÃ“N SE SINCRONIZÃ“ ======
+          // Esto evita race condition: carpeta ya existe + PAGOS ya tiene el cÃ³digo
           if (comprobante && comprobante.imagen && comprobante.nombre_archivo) {
-            console.log(`📸 [BG] Subiendo comprobante - Código: ${codigoOperacion}`);
+            console.log(`ðŸ“¸ [BG] Subiendo comprobante - CÃ³digo: ${codigoOperacion}`);
             
-            // Función con reintentos para comprobante
+            // FunciÃ³n con reintentos para comprobante
             const subirComprobanteConReintentos = async (intento = 1, maxIntentos = 3) => {
               try {
                 return await Promise.race([
@@ -1081,7 +1081,7 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
               } catch (err) {
                 if (intento < maxIntentos) {
                   const delayMs = Math.pow(2, intento) * 1000;
-                  console.warn(`⚠️ [BG] Comprobante intento ${intento}/${maxIntentos} falló - Código: ${codigoOperacion}`);
+                  console.warn(`âš ï¸ [BG] Comprobante intento ${intento}/${maxIntentos} fallÃ³ - CÃ³digo: ${codigoOperacion}`);
                   console.warn(`   Error: ${err.message} - Reintentando en ${delayMs/1000}s...`);
                   await new Promise(resolve => setTimeout(resolve, delayMs));
                   return subirComprobanteConReintentos(intento + 1, maxIntentos);
@@ -1098,27 +1098,27 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
                   `UPDATE alumnos SET comprobante_pago_url = ? WHERE alumno_id = ?`,
                   [compResp.url_comprobante, inscripcionData.alumnoId]
                 );
-                console.log(`✅ [BG] Comprobante subido - Código: ${codigoOperacion}`);
+                console.log(`âœ… [BG] Comprobante subido - CÃ³digo: ${codigoOperacion}`);
               } else {
-                console.error(`❌ [BG] Comprobante falló - Código: ${codigoOperacion}:`, compResp.error);
+                console.error(`âŒ [BG] Comprobante fallÃ³ - CÃ³digo: ${codigoOperacion}:`, compResp.error);
               }
             } catch (compErr) {
-              console.error(`❌ [BG] Error subida comprobante - Código: ${codigoOperacion}:`, compErr.message);
+              console.error(`âŒ [BG] Error subida comprobante - CÃ³digo: ${codigoOperacion}:`, compErr.message);
             }
           }
         } else {
-          console.error(`❌ [BG] Apps Script error - Código: ${codigoOperacion}:`, appsScriptResponse.error);
+          console.error(`âŒ [BG] Apps Script error - CÃ³digo: ${codigoOperacion}:`, appsScriptResponse.error);
         }
       })
       .catch(err => {
-        console.error(`❌ [BG] Apps Script falló (máx 3 reintentos) - Código: ${codigoOperacion}:`, err.message);
+        console.error(`âŒ [BG] Apps Script fallÃ³ (mÃ¡x 3 reintentos) - CÃ³digo: ${codigoOperacion}:`, err.message);
       });
     });
     
-    // Responder inmediatamente con éxito de MySQL (formato compatible con tests)
+    // Responder inmediatamente con Ã©xito de MySQL (formato compatible con tests)
     res.json({
       success: true,
-      message: 'Inscripción registrada exitosamente',
+      message: 'InscripciÃ³n registrada exitosamente',
       codigo_operacion: codigoOperacion,
       alumno: {
         alumno_id: inscripcionData.alumnoId,
@@ -1137,10 +1137,10 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
     });
     
   } catch (error) {
-    console.error('❌ Error al inscribir:', error);
+    console.error('âŒ Error al inscribir:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message || 'Error al procesar inscripción' 
+      error: error.message || 'Error al procesar inscripciÃ³n' 
     });
   }
 });
@@ -1153,14 +1153,14 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
     // ==================== CONSULTAR DESDE MYSQL (PRINCIPAL) ====================
     if (db) {
       try {
-        console.log(`🔍 Consultando inscripciones de DNI ${dni} en MySQL...`);
+        console.log(`ðŸ” Consultando inscripciones de DNI ${dni} en MySQL...`);
         
         const [rows] = await db.query(`
           SELECT 
@@ -1182,8 +1182,8 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
           ORDER BY i.fecha_inscripcion DESC
         `, [dni]);
         
-        console.log(`✅ Inscripciones activas encontradas en MySQL: ${rows.length}`);
-        console.log(`📊 Datos:`, JSON.stringify(rows, null, 2));
+        console.log(`âœ… Inscripciones activas encontradas en MySQL: ${rows.length}`);
+        console.log(`ðŸ“Š Datos:`, JSON.stringify(rows, null, 2));
         
         return res.json({
           success: true,
@@ -1193,13 +1193,13 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
         });
         
       } catch (mysqlError) {
-        console.error('❌ Error en MySQL, intentando con Google Sheets:', mysqlError);
+        console.error('âŒ Error en MySQL, intentando con Google Sheets:', mysqlError);
         // Continuar con Google Sheets como fallback
       }
     }
     
     // ==================== GOOGLE SHEETS (FALLBACK) ====================
-    console.log('⚠️ Consultando Google Sheets como fallback...');
+    console.log('âš ï¸ Consultando Google Sheets como fallback...');
     const url = `${APPS_SCRIPT_URL}?action=mis_inscripciones&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}&dni=${encodeURIComponent(dni)}`;
     
     const response = await fetch(url);
@@ -1214,7 +1214,7 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
       source: 'google_sheets'
     });
   } catch (error) {
-    console.error('❌ Error al obtener inscripciones:', error);
+    console.error('âŒ Error al obtener inscripciones:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al obtener inscripciones' 
@@ -1222,7 +1222,7 @@ app.get('/api/mis-inscripciones/:dni', async (req, res) => {
   }
 });
 
-// Endpoint: Eliminar un día/horario de una inscripción existente
+// Endpoint: Eliminar un dÃ­a/horario de una inscripciÃ³n existente
 app.post('/api/eliminar-horario', async (req, res) => {
   try {
     const { dni, inscripcion_id, horario_id } = req.body;
@@ -1232,7 +1232,7 @@ app.post('/api/eliminar-horario', async (req, res) => {
     }
     if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
 
-    // 1. Validar que la inscripción pertenece al DNI y está activa
+    // 1. Validar que la inscripciÃ³n pertenece al DNI y estÃ¡ activa
     const [inscRows] = await db.query(`
       SELECT i.inscripcion_id, i.plan, d.nombre as deporte
       FROM inscripciones i
@@ -1242,10 +1242,10 @@ app.post('/api/eliminar-horario', async (req, res) => {
     `, [dni, inscripcion_id]);
 
     if (inscRows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada o no está activa' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada o no estÃ¡ activa' });
     }
 
-    // 2. Verificar que quedan más de 1 día (no dejar inscripción vacía)
+    // 2. Verificar que quedan mÃ¡s de 1 dÃ­a (no dejar inscripciÃ³n vacÃ­a)
     const [countRows] = await db.query(
       'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
       [inscripcion_id]
@@ -1253,7 +1253,7 @@ app.post('/api/eliminar-horario', async (req, res) => {
     if (countRows[0].total <= 1) {
       return res.status(400).json({
         success: false,
-        error: 'No puedes eliminar el único día registrado. Si deseas cancelar la inscripción, contacta al administrador.'
+        error: 'No puedes eliminar el Ãºnico dÃ­a registrado. Si deseas cancelar la inscripciÃ³n, contacta al administrador.'
       });
     }
 
@@ -1263,10 +1263,10 @@ app.post('/api/eliminar-horario', async (req, res) => {
       [inscripcion_id, horario_id]
     );
     if (del.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: 'Horario no encontrado en esta inscripción' });
+      return res.status(404).json({ success: false, error: 'Horario no encontrado en esta inscripciÃ³n' });
     }
 
-    // 4. Recalcular precio_mensual con el nuevo total de días
+    // 4. Recalcular precio_mensual con el nuevo total de dÃ­as
     const [totalRows] = await db.query(
       'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
       [inscripcion_id]
@@ -1276,11 +1276,11 @@ app.post('/api/eliminar-horario', async (req, res) => {
 
     const calcularPrecio = (dias, plan, deporte) => {
       if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
-      if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+      if (plan === 'Baby FÃºtbol' || deporte === 'Baby FÃºtbol') {
         if (dias === 1) return 50; if (dias === 2) return 100; return 150;
       }
-      if (plan === 'Económico') { if (dias === 2) return 60; if (dias >= 3) return 80; return 60; }
-      if (plan === 'Estándar') { if (dias === 1) return 40; if (dias === 2) return 80; return 120; }
+      if (plan === 'EconÃ³mico') { if (dias === 2) return 60; if (dias >= 3) return 80; return 60; }
+      if (plan === 'EstÃ¡ndar') { if (dias === 1) return 40; if (dias === 2) return 80; return 120; }
       if (plan === 'Premium') { if (dias === 2) return 100; return 150; }
       return 60;
     };
@@ -1299,30 +1299,30 @@ app.post('/api/eliminar-horario', async (req, res) => {
           [nuevoPrecio, alumnoRows[0].alumno_id, mesActual]
         );
         if (updated.affectedRows > 0) {
-          console.log(`💰 pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
+          console.log(`ðŸ’° pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
         }
       }
-    } catch (e) { console.error('⚠️ Error al actualizar pagos_mensuales:', e.message); }
+    } catch (e) { console.error('âš ï¸ Error al actualizar pagos_mensuales:', e.message); }
 
-    // 5. Limpiar caché
+    // 5. Limpiar cachÃ©
     cache.del(getCacheKey('consultas', dni));
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     if (inscritosKeys.length > 0) cache.del(inscritosKeys);
-    console.log(`🗑️ Horario ${horario_id} eliminado de inscripción ${inscripcion_id}. Días restantes: ${totalDias}. Precio: S/.${nuevoPrecio}`);
+    console.log(`ðŸ—‘ï¸ Horario ${horario_id} eliminado de inscripciÃ³n ${inscripcion_id}. DÃ­as restantes: ${totalDias}. Precio: S/.${nuevoPrecio}`);
 
     res.json({
       success: true,
-      message: 'Día eliminado correctamente',
+      message: 'DÃ­a eliminado correctamente',
       nuevo_precio: nuevoPrecio,
       total_dias: totalDias
     });
   } catch (error) {
-    console.error('❌ Error al eliminar horario:', error);
+    console.error('âŒ Error al eliminar horario:', error);
     res.status(500).json({ success: false, error: 'Error al eliminar el horario. Intente nuevamente.' });
   }
 });
 
-// Endpoint: Agregar un día/horario a una inscripción existente
+// Endpoint: Agregar un dÃ­a/horario a una inscripciÃ³n existente
 app.post('/api/agregar-horario', async (req, res) => {
   try {
     const { dni, inscripcion_id, horario_id } = req.body;
@@ -1338,7 +1338,7 @@ app.post('/api/agregar-horario', async (req, res) => {
       return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
     }
 
-    // 1. Validar que la inscripción pertenece al DNI y está activa
+    // 1. Validar que la inscripciÃ³n pertenece al DNI y estÃ¡ activa
     const [inscRows] = await db.query(`
       SELECT i.inscripcion_id, i.deporte_id, d.nombre as deporte
       FROM inscripciones i
@@ -1350,7 +1350,7 @@ app.post('/api/agregar-horario', async (req, res) => {
     if (inscRows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Inscripción no encontrada o no está activa'
+        error: 'InscripciÃ³n no encontrada o no estÃ¡ activa'
       });
     }
 
@@ -1366,11 +1366,11 @@ app.post('/api/agregar-horario', async (req, res) => {
     if (horRows.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'El horario no corresponde al deporte inscrito o no está disponible'
+        error: 'El horario no corresponde al deporte inscrito o no estÃ¡ disponible'
       });
     }
 
-    // 2b. Validar que la categoría y plan del nuevo horario coincidan con los horarios existentes
+    // 2b. Validar que la categorÃ­a y plan del nuevo horario coincidan con los horarios existentes
     const [horExistentes] = await db.query(`
       SELECT h.categoria, h.plan
       FROM inscripcion_horarios ih
@@ -1385,25 +1385,25 @@ app.post('/api/agregar-horario', async (req, res) => {
       if (catExistente && catNueva && catExistente !== catNueva) {
         return res.status(400).json({
           success: false,
-          error: `El horario seleccionado es de categoría ${catNueva}, pero tu inscripción es de categoría ${catExistente}.`
+          error: `El horario seleccionado es de categorÃ­a ${catNueva}, pero tu inscripciÃ³n es de categorÃ­a ${catExistente}.`
         });
       }
       if (planExistente && planNuevo && planExistente !== planNuevo) {
         return res.status(400).json({
           success: false,
-          error: `El horario seleccionado corresponde al plan ${planNuevo}, pero tu inscripción es del plan ${planExistente}.`
+          error: `El horario seleccionado corresponde al plan ${planNuevo}, pero tu inscripciÃ³n es del plan ${planExistente}.`
         });
       }
     }
 
-    // 3. Verificar que no esté ya inscrito en ese horario
+    // 3. Verificar que no estÃ© ya inscrito en ese horario
     const [existRows] = await db.query(`
       SELECT 1 FROM inscripcion_horarios
       WHERE inscripcion_id = ? AND horario_id = ?
     `, [inscripcion_id, horario_id]);
 
     if (existRows.length > 0) {
-      return res.status(409).json({ success: false, error: 'Ya estás inscrito en ese horario' });
+      return res.status(409).json({ success: false, error: 'Ya estÃ¡s inscrito en ese horario' });
     }
 
     // 4. Insertar el nuevo horario
@@ -1411,7 +1411,7 @@ app.post('/api/agregar-horario', async (req, res) => {
       INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)
     `, [inscripcion_id, horario_id]);
 
-    // 5. Recalcular precio_mensual según el nuevo total de días
+    // 5. Recalcular precio_mensual segÃºn el nuevo total de dÃ­as
     const [totalDiasRows] = await db.query(`
       SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?
     `, [inscripcion_id]);
@@ -1420,24 +1420,24 @@ app.post('/api/agregar-horario', async (req, res) => {
     const [planRows] = await db.query(`
       SELECT plan FROM inscripciones WHERE inscripcion_id = ?
     `, [inscripcion_id]);
-    const plan = planRows[0]?.plan || 'Económico';
+    const plan = planRows[0]?.plan || 'EconÃ³mico';
     const deporteNombre = inscripcion.deporte;
 
-    // Misma lógica que el endpoint de inscripción
+    // Misma lÃ³gica que el endpoint de inscripciÃ³n
     const calcularPrecio = (cantidadDias, plan, deporte) => {
       if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
-      if (plan === 'Baby Fútbol' || deporte === 'Baby Fútbol') {
+      if (plan === 'Baby FÃºtbol' || deporte === 'Baby FÃºtbol') {
         if (cantidadDias === 1) return 50;
         if (cantidadDias === 2) return 100;
         if (cantidadDias >= 3) return 150;
         return 50;
       }
-      if (plan === 'Económico') {
+      if (plan === 'EconÃ³mico') {
         if (cantidadDias === 2) return 60;
         if (cantidadDias >= 3) return 80;
         return 60;
       }
-      if (plan === 'Estándar') {
+      if (plan === 'EstÃ¡ndar') {
         if (cantidadDias === 1) return 40;
         if (cantidadDias === 2) return 80;
         if (cantidadDias >= 3) return 120;
@@ -1456,7 +1456,7 @@ app.post('/api/agregar-horario', async (req, res) => {
       UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?
     `, [nuevoPrecio, inscripcion_id]);
 
-    console.log(`💰 precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} días, plan ${plan})`);
+    console.log(`ðŸ’° precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} dÃ­as, plan ${plan})`);
 
     // 5b. Actualizar monto en pagos_mensuales pendientes del mes actual
     try {
@@ -1470,26 +1470,26 @@ app.post('/api/agregar-horario', async (req, res) => {
           [nuevoPrecio, alumnoRows[0].alumno_id, mesActual]
         );
         if (updated.affectedRows > 0) {
-          console.log(`💰 pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
+          console.log(`ðŸ’° pagos_mensuales actualizado a S/.${nuevoPrecio} para DNI ${dni} mes ${mesActual}`);
         }
       }
-    } catch (e) { console.error('⚠️ Error al actualizar pagos_mensuales:', e.message); }
+    } catch (e) { console.error('âš ï¸ Error al actualizar pagos_mensuales:', e.message); }
 
-    // 6. Limpiar caché del DNI
+    // 6. Limpiar cachÃ© del DNI
     const cacheKeyConsulta = getCacheKey('consultas', dni);
     cache.del(cacheKeyConsulta);
 
-    console.log(`✅ Horario ${horario_id} (${horRows[0].dia} ${horRows[0].hora_inicio}) agregado a inscripción ${inscripcion_id} (DNI ${dni})`);
+    console.log(`âœ… Horario ${horario_id} (${horRows[0].dia} ${horRows[0].hora_inicio}) agregado a inscripciÃ³n ${inscripcion_id} (DNI ${dni})`);
 
     res.json({
       success: true,
-      message: `Día ${horRows[0].dia} agregado correctamente a ${inscripcion.deporte}`,
+      message: `DÃ­a ${horRows[0].dia} agregado correctamente a ${inscripcion.deporte}`,
       nuevo_precio: nuevoPrecio,
       total_dias: totalDias
     });
 
   } catch (error) {
-    console.error('❌ Error al agregar horario:', error);
+    console.error('âŒ Error al agregar horario:', error);
     res.status(500).json({ success: false, error: 'Error al agregar el horario. Intente nuevamente.' });
   }
 });
@@ -1526,15 +1526,15 @@ app.post('/api/registrar-pago', async (req, res) => {
       throw new Error(data.error || 'Error al registrar pago');
     }
     
-    // INVALIDAR CACHÉ después de registrar pago
+    // INVALIDAR CACHÃ‰ despuÃ©s de registrar pago
     if (alumno.dni) {
       invalidateDNICache(alumno.dni);
     }
-    console.log('🗑️ CACHÉ INVALIDADO tras registrar pago');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras registrar pago');
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al registrar pago:', error);
+    console.error('âŒ Error al registrar pago:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al registrar pago' 
@@ -1550,7 +1550,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
@@ -1565,7 +1565,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al verificar pago:', error);
+    console.error('âŒ Error al verificar pago:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al verificar pago' 
@@ -1582,7 +1582,7 @@ app.get('/api/validar-dni/:dni', async (req, res) => {
       return res.status(400).json({
         success: false,
         valido: false,
-        error: 'DNI debe tener 8 dígitos'
+        error: 'DNI debe tener 8 dÃ­gitos'
       });
     }
     
@@ -1597,7 +1597,7 @@ app.get('/api/validar-dni/:dni', async (req, res) => {
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al validar DNI:', error);
+    console.error('âŒ Error al validar DNI:', error);
     res.status(500).json({ 
       success: false,
       valido: false,
@@ -1606,12 +1606,12 @@ app.get('/api/validar-dni/:dni', async (req, res) => {
   }
 });
 
-// Endpoint público para consultar datos de un alumno por DNI (autocompletado e inscripciones)
+// Endpoint pÃºblico para consultar datos de un alumno por DNI (autocompletado e inscripciones)
 app.get('/api/consultar/:dni', async (req, res) => {
   try {
     const { dni } = req.params;
     if (!dni || dni.toString().trim().length < 6) {
-      return res.status(400).json({ success: false, error: 'DNI inválido' });
+      return res.status(400).json({ success: false, error: 'DNI invÃ¡lido' });
     }
 
     if (!db) {
@@ -1728,8 +1728,8 @@ app.get('/api/consultar/:dni', async (req, res) => {
       }
     });
 
-    // Si monto_pago está guardado usarlo; si es NULL (admin confirmó sin ingresar monto)
-    // calcular dinámicamente sumando precio_mensual de las inscripciones activas únicas
+    // Si monto_pago estÃ¡ guardado usarlo; si es NULL (admin confirmÃ³ sin ingresar monto)
+    // calcular dinÃ¡micamente sumando precio_mensual de las inscripciones activas Ãºnicas
     const montoNumerico = parseFloat(usuario.monto_pago) ||
       Array.from(inscripcionesMap.values()).reduce((sum, i) => sum + parseFloat(i.precio || 0), 0);
 
@@ -1741,7 +1741,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
         fecha_pago: usuario.fecha_pago,
         fecha_registro: usuario.fecha_pago || usuario.created_at,
         monto: montoNumerico,
-        metodo_pago: usuario.numero_operacion ? `Operación: ${usuario.numero_operacion}` : 'Transferencia / Depósito',
+        metodo_pago: usuario.numero_operacion ? `OperaciÃ³n: ${usuario.numero_operacion}` : 'Transferencia / DepÃ³sito',
         numero_operacion: usuario.numero_operacion,
         comprobante_url: usuario.comprobante_pago_url
       },
@@ -1752,7 +1752,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error al consultar alumno por DNI:', error);
+    console.error('âŒ Error al consultar alumno por DNI:', error);
     res.status(500).json({ success: false, error: 'Error interno al consultar alumno' });
   }
 });
@@ -1765,7 +1765,7 @@ app.delete('/api/eliminar-usuario/:dni', async (req, res) => {
     if (!dni || dni.toString().length !== 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI debe tener 8 dígitos'
+        error: 'DNI debe tener 8 dÃ­gitos'
       });
     }
     
@@ -1778,16 +1778,16 @@ app.delete('/api/eliminar-usuario/:dni', async (req, res) => {
       throw new Error(data.error || 'Error al eliminar usuario');
     }
     
-    // INVALIDAR CACHÉ después de eliminación exitosa
+    // INVALIDAR CACHÃ‰ despuÃ©s de eliminaciÃ³n exitosa
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
     cache.del(inscritosKeys);
     cache.del(horariosKeys);
-    console.log('🗑️ CACHÉ INVALIDADO tras eliminar usuario');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras eliminar usuario');
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al eliminar usuario:', error);
+    console.error('âŒ Error al eliminar usuario:', error);
     res.status(500).json({ 
       success: false,
       error: error.message || 'Error al eliminar usuario' 
@@ -1795,7 +1795,7 @@ app.delete('/api/eliminar-usuario/:dni', async (req, res) => {
   }
 });
 
-// Endpoint: Consultar inscripción por DNI (para página de consulta)
+// Endpoint: Consultar inscripciÃ³n por DNI (para pÃ¡gina de consulta)
 app.get('/api/consultar/:dni', async (req, res) => {
   try {
     const { dni } = req.params;
@@ -1803,31 +1803,31 @@ app.get('/api/consultar/:dni', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
-    // Crear clave de caché para este DNI
+    // Crear clave de cachÃ© para este DNI
     const cacheKey = getCacheKey('consultas', dni);
     
-    // Consultas admin con incluir_inactivos saltan el caché
+    // Consultas admin con incluir_inactivos saltan el cachÃ©
     const incluirInactivos = req.query.incluir_inactivos === '1';
     
-    // Intentar obtener del caché (solo para consultas públicas)
+    // Intentar obtener del cachÃ© (solo para consultas pÃºblicas)
     if (!incluirInactivos) {
       const cachedData = cache.get(cacheKey);
       if (cachedData) {
-        console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
+        console.log(`âš¡ CACHÃ‰ HIT: ${cacheKey}`);
         return res.json(cachedData);
       }
     }
     
-    console.log(`🌐 CACHÉ MISS: ${cacheKey}`);
+    console.log(`ðŸŒ CACHÃ‰ MISS: ${cacheKey}`);
     
     // ==================== CONSULTAR MYSQL PRIMERO ====================
     if (db) {
       try {
-        console.log(`🔍 Consultando estado para DNI ${dni} en MySQL...`);
+        console.log(`ðŸ” Consultando estado para DNI ${dni} en MySQL...`);
         
         // Obtener datos del alumno
         const [alumnoRows] = await db.query(`
@@ -1858,13 +1858,13 @@ app.get('/api/consultar/:dni', async (req, res) => {
         if (alumnoRows.length === 0) {
           return res.status(404).json({
             success: false,
-            error: 'No se encontró ninguna inscripción con ese DNI'
+            error: 'No se encontrÃ³ ninguna inscripciÃ³n con ese DNI'
           });
         }
         
         const alumno = alumnoRows[0];
         
-        // Validar que el usuario esté activo (a menos que sea consulta admin)
+        // Validar que el usuario estÃ© activo (a menos que sea consulta admin)
         if (alumno.estado === 'inactivo' && !incluirInactivos) {
           return res.status(403).json({
             success: false,
@@ -1873,7 +1873,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           });
         }
         
-        // Obtener inscripciones (si es admin, incluir canceladas también)
+        // Obtener inscripciones (si es admin, incluir canceladas tambiÃ©n)
         const estadosInscripcion = incluirInactivos 
           ? `('activa', 'suspendida', 'pendiente', 'cancelada')` 
           : `('activa', 'suspendida', 'pendiente')`;
@@ -1891,7 +1891,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           WHERE i.alumno_id = ? AND i.estado IN ${estadosInscripcion}
         `, [alumno.alumno_id]);
         
-        // Obtener horarios de cada inscripción
+        // Obtener horarios de cada inscripciÃ³n
         const horariosCompletos = [];
         for (const inscripcion of inscripciones) {
           const [horarios] = await db.query(`
@@ -1904,7 +1904,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
             FROM inscripcion_horarios ih
             JOIN horarios h ON ih.horario_id = h.horario_id
             WHERE ih.inscripcion_id = ?
-            ORDER BY FIELD(h.dia, 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO')
+            ORDER BY FIELD(h.dia, 'LUNES', 'MARTES', 'MIÃ‰RCOLES', 'JUEVES', 'VIERNES', 'SÃBADO', 'DOMINGO')
           `, [inscripcion.inscripcion_id]);
           
           if (horarios.length > 0) {
@@ -1914,7 +1914,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
                 horario_id: h.horario_id,
                 deporte: inscripcion.deporte,
                 sede: 'Sede Principal',
-                plan: inscripcion.plan || 'Económico',
+                plan: inscripcion.plan || 'EconÃ³mico',
                 dia: h.dia,
                 hora_inicio: h.hora_inicio,
                 hora_fin: h.hora_fin,
@@ -1929,7 +1929,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
               inscripcion_id: inscripcion.inscripcion_id,
               deporte: inscripcion.deporte,
               sede: 'Sede Principal',
-              plan: inscripcion.plan || 'Económico',
+              plan: inscripcion.plan || 'EconÃ³mico',
               dia: 'Por definir',
               hora_inicio: null,
               hora_fin: null,
@@ -1981,7 +1981,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
           source: 'mysql'
         };
 
-        // ✅ AUTO-REPARAR: Si faltan URLs de documentos, consultarlas en Apps Script y guardarlas
+        // âœ… AUTO-REPARAR: Si faltan URLs de documentos, consultarlas en Apps Script y guardarlas
         const faltanURLs = !alumno.dni_frontal_url || !alumno.dni_reverso_url || !alumno.foto_carnet_url;
         if (faltanURLs) {
           try {
@@ -1996,7 +1996,7 @@ app.get('/api/consultar/:dni', async (req, res) => {
               const reverso = u.dni_reverso_url || u.dniReversoUrl || null;
               const carnet = u.foto_carnet_url || u.fotoCarnetUrl || null;
               if (frontal || reverso || carnet) {
-                // Guardar en MySQL para la próxima vez
+                // Guardar en MySQL para la prÃ³xima vez
                 await db.query(
                   `UPDATE alumnos SET
                     dni_frontal_url = COALESCE(dni_frontal_url, ?),
@@ -2009,57 +2009,57 @@ app.get('/api/consultar/:dni', async (req, res) => {
                 resultado.alumno.dni_frontal_url = resultado.alumno.dni_frontal_url || frontal;
                 resultado.alumno.dni_reverso_url = resultado.alumno.dni_reverso_url || reverso;
                 resultado.alumno.foto_carnet_url = resultado.alumno.foto_carnet_url || carnet;
-                console.log(`✅ URLs de documentos recuperadas de Apps Script para DNI ${dni}`);
+                console.log(`âœ… URLs de documentos recuperadas de Apps Script para DNI ${dni}`);
               }
             }
           } catch (e) {
-            console.warn(`⚠️ No se pudieron recuperar URLs de Apps Script para DNI ${dni}:`, e.message);
+            console.warn(`âš ï¸ No se pudieron recuperar URLs de Apps Script para DNI ${dni}:`, e.message);
           }
         }
 
-        // Cachear resultado (solo consultas públicas, no admin con canceladas)
+        // Cachear resultado (solo consultas pÃºblicas, no admin con canceladas)
         if (!incluirInactivos) {
           cache.set(cacheKey, resultado, CACHE_TTL.consultas);
-          console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
+          console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
         }
-        console.log(`✅ Consulta desde MySQL - Estado pago: ${alumno.estado_pago}`);
+        console.log(`âœ… Consulta desde MySQL - Estado pago: ${alumno.estado_pago}`);
         
         return res.json(resultado);
         
       } catch (mysqlError) {
-        console.error('❌ Error en MySQL, usando Google Sheets:', mysqlError.message);
+        console.error('âŒ Error en MySQL, usando Google Sheets:', mysqlError.message);
         // Continuar con Google Sheets como fallback
       }
     }
     
     // ==================== GOOGLE SHEETS FALLBACK ====================
-    console.log('⚠️ Consultando Google Sheets como fallback...');
+    console.log('âš ï¸ Consultando Google Sheets como fallback...');
     const url = `${APPS_SCRIPT_URL}?action=consultar_inscripcion&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}&dni=${encodeURIComponent(dni)}`;
     
     const response = await fetch(url);
     const data = await response.json();
     
     if (!response.ok) {
-      throw new Error(data.error || 'Error al consultar inscripción');
+      throw new Error(data.error || 'Error al consultar inscripciÃ³n');
     }
     
     // Solo cachear si la consulta fue exitosa
     if (data.success) {
       cache.set(cacheKey, data, CACHE_TTL.consultas);
-      console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
+      console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
     }
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al consultar inscripción:', error);
+    console.error('âŒ Error al consultar inscripciÃ³n:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message || 'Error al consultar inscripción' 
+      error: error.message || 'Error al consultar inscripciÃ³n' 
     });
   }
 });
 
-// Endpoint: Obtener datos de inscripción por código de operación
+// Endpoint: Obtener datos de inscripciÃ³n por cÃ³digo de operaciÃ³n
 app.get('/api/inscripcion/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
@@ -2067,11 +2067,11 @@ app.get('/api/inscripcion/:codigo', async (req, res) => {
     if (!codigo) {
       return res.status(400).json({
         success: false,
-        error: 'Código de operación requerido'
+        error: 'CÃ³digo de operaciÃ³n requerido'
       });
     }
     
-    console.log(`🔍 Buscando inscripción con código: ${codigo}`);
+    console.log(`ðŸ” Buscando inscripciÃ³n con cÃ³digo: ${codigo}`);
     
     const query = `
       SELECT 
@@ -2096,11 +2096,11 @@ app.get('/api/inscripcion/:codigo', async (req, res) => {
     if (!inscripciones || inscripciones.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'No se encontró ninguna inscripción con ese código'
+        error: 'No se encontrÃ³ ninguna inscripciÃ³n con ese cÃ³digo'
       });
     }
     
-    // Agrupar horarios por inscripción
+    // Agrupar horarios por inscripciÃ³n
     const primerInscripcion = inscripciones[0];
     const horarios = inscripciones.map(ins => ({
       deporte: ins.deporte,
@@ -2108,7 +2108,7 @@ app.get('/api/inscripcion/:codigo', async (req, res) => {
       matricula: parseFloat(ins.matricula || 0)
     }));
     
-    // Calcular deportes nuevos para matrícula
+    // Calcular deportes nuevos para matrÃ­cula
     const deportesUnicos = [...new Set(horarios.map(h => h.deporte))];
     const matriculaTotal = deportesUnicos.length * 20;
     
@@ -2127,14 +2127,14 @@ app.get('/api/inscripcion/:codigo', async (req, res) => {
       }
     };
     
-    console.log(`✅ Inscripción encontrada: ${datos.alumno} (${datos.dni})`);
+    console.log(`âœ… InscripciÃ³n encontrada: ${datos.alumno} (${datos.dni})`);
     
     res.json(datos);
   } catch (error) {
-    console.error('❌ Error al obtener inscripción:', error);
+    console.error('âŒ Error al obtener inscripciÃ³n:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Error al obtener inscripción'
+      error: error.message || 'Error al obtener inscripciÃ³n'
     });
   }
 });
@@ -2144,7 +2144,7 @@ app.post('/api/subir-comprobante', async (req, res) => {
   try {
     const { codigo_operacion, dni, alumno, imagen, nombre_archivo } = req.body;
     
-    // Validaciones básicas
+    // Validaciones bÃ¡sicas
     if (!codigo_operacion || !dni || !imagen || !nombre_archivo) {
       return res.status(400).json({
         success: false,
@@ -2156,13 +2156,13 @@ app.post('/api/subir-comprobante', async (req, res) => {
     if (!imagen.startsWith('data:image/')) {
       return res.status(400).json({
         success: false,
-        error: 'Formato de imagen inválido. Debe ser Base64 con prefijo data:image/'
+        error: 'Formato de imagen invÃ¡lido. Debe ser Base64 con prefijo data:image/'
       });
     }
     
-    console.log(`📸 Subiendo comprobante para DNI ${dni}, código: ${codigo_operacion}`);
+    console.log(`ðŸ“¸ Subiendo comprobante para DNI ${dni}, cÃ³digo: ${codigo_operacion}`);
 
-    // Validar que el código existe en MySQL (no depender del Sheet)
+    // Validar que el cÃ³digo existe en MySQL (no depender del Sheet)
     if (db) {
       const [rows] = await db.query(
         `SELECT i.inscripcion_id FROM inscripciones i
@@ -2173,7 +2173,7 @@ app.post('/api/subir-comprobante', async (req, res) => {
       if (rows.length === 0) {
         return res.status(404).json({
           success: false,
-          error: 'Código de operación no encontrado. Verifica tu inscripción.'
+          error: 'CÃ³digo de operaciÃ³n no encontrado. Verifica tu inscripciÃ³n.'
         });
       }
       // Marcar en MySQL que el comprobante fue recibido (pendiente de subir a Drive)
@@ -2184,19 +2184,19 @@ app.post('/api/subir-comprobante', async (req, res) => {
       );
     }
 
-    // Invalidar caché inmediatamente
+    // Invalidar cachÃ© inmediatamente
     invalidateDNICache(dni);
 
-    // Responder éxito al usuario de inmediato
+    // Responder Ã©xito al usuario de inmediato
     res.json({
       success: true,
-      message: 'Comprobante recibido correctamente. Será procesado en breve.',
+      message: 'Comprobante recibido correctamente. SerÃ¡ procesado en breve.',
       url_comprobante: null
     });
 
     // Subir a Apps Script / Google Drive en background
     setImmediate(() => {
-      console.log(`📤 [BG] Subiendo comprobante a Drive para código: ${codigo_operacion}`);
+      console.log(`ðŸ“¤ [BG] Subiendo comprobante a Drive para cÃ³digo: ${codigo_operacion}`);
       Promise.race([
         fetch(APPS_SCRIPT_URL, {
           method: 'POST',
@@ -2219,18 +2219,18 @@ app.post('/api/subir-comprobante', async (req, res) => {
             `UPDATE alumnos SET comprobante_pago_url = ? WHERE dni = ?`,
             [data.url_comprobante, dni]
           );
-          console.log(`✅ [BG] Comprobante subido a Drive: ${data.url_comprobante}`);
+          console.log(`âœ… [BG] Comprobante subido a Drive: ${data.url_comprobante}`);
         } else {
-          console.error('❌ [BG] Apps Script error al subir comprobante:', data.error);
+          console.error('âŒ [BG] Apps Script error al subir comprobante:', data.error);
         }
       })
       .catch(err => {
-        console.error('❌ [BG] Falló subida de comprobante a Drive:', err.message);
+        console.error('âŒ [BG] FallÃ³ subida de comprobante a Drive:', err.message);
       });
     });
 
   } catch (error) {
-    console.error('❌ Error al subir comprobante:', error);
+    console.error('âŒ Error al subir comprobante:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al subir comprobante' 
@@ -2240,7 +2240,7 @@ app.post('/api/subir-comprobante', async (req, res) => {
 
 /**
  * POST /api/subir-comprobante-tardio/:dni
- * Subir comprobante después de la inscripción (para usuarios que eligieron efectivo)
+ * Subir comprobante despuÃ©s de la inscripciÃ³n (para usuarios que eligieron efectivo)
  */
 app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
   try {
@@ -2258,19 +2258,19 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
     if (!numero_operacion || !numero_operacion.trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Número de operación requerido',
-        message: 'Debes ingresar el número de operación de tu comprobante de pago.'
+        error: 'NÃºmero de operaciÃ³n requerido',
+        message: 'Debes ingresar el nÃºmero de operaciÃ³n de tu comprobante de pago.'
       });
     }
     
     if (!imagen.startsWith('data:image/')) {
       return res.status(400).json({
         success: false,
-        error: 'Formato de imagen inválido. Debe ser Base64 con prefijo data:image/'
+        error: 'Formato de imagen invÃ¡lido. Debe ser Base64 con prefijo data:image/'
       });
     }
     
-    console.log(`📸 Subida tardía de comprobante para DNI ${dni}`);
+    console.log(`ðŸ“¸ Subida tardÃ­a de comprobante para DNI ${dni}`);
     
     // Verificar que el alumno existe y no tiene comprobante
     const [alumnos] = await db.query(
@@ -2310,7 +2310,7 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
     const data = await response.json();
     
     if (!response.ok || !data.success) {
-      console.error('❌ Error del Apps Script al subir comprobante tardío:', data.error);
+      console.error('âŒ Error del Apps Script al subir comprobante tardÃ­o:', data.error);
       return res.status(response.status || 500).json({
         success: false,
         error: data.error || 'Error al subir comprobante a Google Drive'
@@ -2318,16 +2318,16 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
     }
     
     const urlComprobante = data.url_comprobante;
-    console.log('✅ Comprobante subido a Drive:', urlComprobante);
+    console.log('âœ… Comprobante subido a Drive:', urlComprobante);
     
-    // Actualizar MySQL con la URL del comprobante y el número de operación
+    // Actualizar MySQL con la URL del comprobante y el nÃºmero de operaciÃ³n
     await db.query(
       'UPDATE alumnos SET comprobante_pago_url = ?, numero_operacion = ?, updated_at = NOW() WHERE dni = ?',
       [urlComprobante, numero_operacion.trim(), dni]
     );
-    console.log('✅ MySQL actualizado con URL del comprobante y número de operación');
+    console.log('âœ… MySQL actualizado con URL del comprobante y nÃºmero de operaciÃ³n');
     
-    // Invalidar caché
+    // Invalidar cachÃ©
     invalidateDNICache(dni);
     
     res.json({
@@ -2337,7 +2337,7 @@ app.post('/api/subir-comprobante-tardio/:dni', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error al subir comprobante tardío:', error);
+    console.error('âŒ Error al subir comprobante tardÃ­o:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al subir comprobante' 
@@ -2364,11 +2364,11 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     if (!imagen.startsWith('data:image/')) {
       return res.status(400).json({
         success: false,
-        error: 'Formato de imagen inválido. Debe ser Base64 con prefijo data:image/'
+        error: 'Formato de imagen invÃ¡lido. Debe ser Base64 con prefijo data:image/'
       });
     }
     
-    console.log(`💳 Pago mensual recibido - DNI: ${dni}, Mes: ${mes}`);
+    console.log(`ðŸ’³ Pago mensual recibido - DNI: ${dni}, Mes: ${mes}`);
     
     // Verificar que el alumno existe
     const [alumnos] = await db.query(
@@ -2386,24 +2386,24 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     const alumnoDb = alumnos[0];
     const nombreCompleto = alumno || `${alumnoDb.nombres} ${alumnoDb.apellido_paterno} ${alumnoDb.apellido_materno}`;
     
-    // Extraer mes y año para verificar duplicado
+    // Extraer mes y aÃ±o para verificar duplicado
     const fechaCheck = new Date();
     const mesCheck = mes ? mes.split(/[-\s]/)[0] : '';
     const anioCheck = fechaCheck.getFullYear();
     
-    // Verificar si ya existe un comprobante para este alumno/mes/año (evitar duplicados en Drive)
+    // Verificar si ya existe un comprobante para este alumno/mes/aÃ±o (evitar duplicados en Drive)
     const [todosLosPagos] = await db.query(
       'SELECT * FROM pagos_mensuales WHERE alumno_id = ? AND mes = ? AND comprobante_url IS NOT NULL',
       [alumnoDb.alumno_id, mesCheck]
     );
-    // Filtrar por año en JS (evita problema de encoding con columna ñ)
+    // Filtrar por aÃ±o en JS (evita problema de encoding con columna Ã±)
     const pagoExistente = todosLosPagos.filter(p => {
       const yearVal = Object.values(p).find(v => typeof v === 'number' && v > 2000 && v < 2100);
       return yearVal === anioCheck;
     });
     
     if (pagoExistente.length > 0) {
-      console.log(`⚠️ Pago mensual duplicado detectado - DNI: ${dni}, Mes: ${mes}. Ya existe comprobante.`);
+      console.log(`âš ï¸ Pago mensual duplicado detectado - DNI: ${dni}, Mes: ${mes}. Ya existe comprobante.`);
       return res.json({
         success: true,
         message: 'Ya tienes un comprobante registrado para este mes. No es necesario enviarlo de nuevo.',
@@ -2433,7 +2433,7 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     const data = await response.json();
     
     if (!response.ok || !data.success) {
-      console.error('❌ Error del Apps Script al subir pago mensual:', data.error);
+      console.error('âŒ Error del Apps Script al subir pago mensual:', data.error);
       return res.status(response.status || 500).json({
         success: false,
         error: data.error || 'Error al subir comprobante a Google Drive'
@@ -2441,9 +2441,9 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     }
     
     const urlComprobante = data.url_comprobante;
-    console.log('✅ Pago mensual subido a Drive:', urlComprobante);
+    console.log('âœ… Pago mensual subido a Drive:', urlComprobante);
     
-    // Extraer mes y año del string (formato: "enero-2026" o "enero de 2026")
+    // Extraer mes y aÃ±o del string (formato: "enero-2026" o "enero de 2026")
     const fechaActual = new Date();
     // Normalizar mes: Linux puede devolver 'setiembre' sin 'p' via toLocaleString
     const MAPA_MESES = { 'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,'julio':7,'agosto':8,'setiembre':9,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12 };
@@ -2454,8 +2454,8 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     const anioActual = fechaActual.getFullYear();
     
     // Registrar en MySQL el pago mensual
-    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
-    // Buscar si ya existe un pago pendiente para este alumno/mes/año
+    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'aÃ±o' â€” fallback unicode-safe
+    // Buscar si ya existe un pago pendiente para este alumno/mes/aÃ±o
     const [existePago] = await db.query(
       'SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND mes = ? AND `' + colYear + '` = ? AND estado = "pendiente" LIMIT 1',
       [alumnoDb.alumno_id, mesNombre, anioActual]
@@ -2474,9 +2474,9 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
         [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante, (numero_operacion || '').trim() || null]
       );
     }
-    console.log('✅ Pago mensual registrado en MySQL');
+    console.log('âœ… Pago mensual registrado en MySQL');
     
-    // Invalidar caché
+    // Invalidar cachÃ©
     invalidateDNICache(dni);
     
     res.json({
@@ -2486,7 +2486,7 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error al registrar pago mensual:', error);
+    console.error('âŒ Error al registrar pago mensual:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al registrar pago mensual' 
@@ -2501,8 +2501,8 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
 app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { estado = 'todos', mes = '', anio = '', buscar = '', deporte = '', grupo = '' } = req.query;
-    console.log(`📋 pagos-mensuales → estado=${estado} mes=${mes} deporte=${deporte} grupo=${grupo} buscar=${buscar}`);
-    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
+    console.log(`ðŸ“‹ pagos-mensuales â†’ estado=${estado} mes=${mes} deporte=${deporte} grupo=${grupo} buscar=${buscar}`);
+    const colYear = global.COL_ANIO || 'a\u00f1o'; // 'aÃ±o' â€” fallback unicode-safe
     const ahora = new Date();
     const NOMBRES_MESES_NORM_PM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const mesActual = NOMBRES_MESES_NORM_PM[ahora.getMonth()];
@@ -2510,9 +2510,9 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     const filtroMes = mes || mesActual;
     const filtroAnio = anio ? parseInt(anio, 10) : anioActual;
 
-    // Necesitamos JOIN a inscripciones/deportes si hay filtro de deporte o categoría
+    // Necesitamos JOIN a inscripciones/deportes si hay filtro de deporte o categorÃ­a
     const necesitaJoinDeporte = !!(deporte || grupo);
-    // Necesitamos JOIN a horarios si hay filtro de categoría
+    // Necesitamos JOIN a horarios si hay filtro de categorÃ­a
     const necesitaJoinHorario = !!grupo;
 
     let query =
@@ -2533,7 +2533,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
                'JOIN deportes d ON i.deporte_id = d.deporte_id ';
     }
     if (necesitaJoinHorario) {
-      // JOIN para filtrar por categoría del horario
+      // JOIN para filtrar por categorÃ­a del horario
       query += 'JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id ' +
                'JOIN horarios h ON h.horario_id = ih.horario_id ';
     }
@@ -2557,7 +2557,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       }
     }
     if (anio) {
-      // Se filtra por año en JS después de la consulta
+      // Se filtra por aÃ±o en JS despuÃ©s de la consulta
     }
     if (deporte) {
       query += ' AND UPPER(d.nombre) = UPPER(?)';
@@ -2573,7 +2573,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       params.push(like, like, like, like);
     }
 
-    // GROUP BY para evitar duplicados cuando un alumno tiene múltiples inscripciones
+    // GROUP BY para evitar duplicados cuando un alumno tiene mÃºltiples inscripciones
     if (necesitaJoinDeporte || necesitaJoinHorario) {
       query += ' GROUP BY pm.pago_id';
     }
@@ -2583,9 +2583,9 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     let [pagos] = await db.query(query, params);
 
     if (estado === 'pendiente' || estado === 'todos') {
-      // 📅 MESES A REVISAR:
-      // Si el admin seleccionó un mes específico → solo ese mes (comportamiento original).
-      // Si no seleccionó mes (campo vacío = "Todos los meses") → busca en TODOS los meses
+      // ðŸ“… MESES A REVISAR:
+      // Si el admin seleccionÃ³ un mes especÃ­fico â†’ solo ese mes (comportamiento original).
+      // Si no seleccionÃ³ mes (campo vacÃ­o = "Todos los meses") â†’ busca en TODOS los meses
       // desde el inicio de operaciones (abril 2026) hasta el mes actual, para que el admin
       // pueda ver los alumnos que deben de meses anteriores sin tener que filtrar uno a uno.
       const MESES_ORDEN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -2593,10 +2593,10 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 
       let mesesABuscar;
       if (mes) {
-        // Mes específico seleccionado → comportamiento original
+        // Mes especÃ­fico seleccionado â†’ comportamiento original
         mesesABuscar = [mes];
       } else {
-        // Sin mes seleccionado → buscar desde abril hasta el mes actual
+        // Sin mes seleccionado â†’ buscar desde abril hasta el mes actual
         const idxInicio = MESES_ORDEN.indexOf(MES_INICIO_OPERACIONES);
         const mesActualNorm = mesActual.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
         const idxActual = MESES_ORDEN.findIndex(m => m.normalize('NFD').replace(/[\u0300-\u036f]/g, '') === mesActualNorm);
@@ -2612,9 +2612,9 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         const esSeptiembre = (mesRevision === 'septiembre' || mesRevision === 'setiembre');
         const pendienteParamsMes = esSeptiembre ? [filtroAnio] : [mesRevision, filtroAnio];
         
-        // Calcular el último día del mes en revisión para filtrar por fecha de inscripción
+        // Calcular el Ãºltimo dÃ­a del mes en revisiÃ³n para filtrar por fecha de inscripciÃ³n
         const mesNumero = MESES_ORDEN.indexOf(mesRevision) + 1;
-        const ultimoDiaMes = new Date(filtroAnio, mesNumero, 0); // día 0 del mes siguiente = último día del mes actual
+        const ultimoDiaMes = new Date(filtroAnio, mesNumero, 0); // dÃ­a 0 del mes siguiente = Ãºltimo dÃ­a del mes actual
         const fechaLimite = `${filtroAnio}-${String(mesNumero).padStart(2, '0')}-${String(ultimoDiaMes.getDate()).padStart(2, '0')} 23:59:59`;
 
         let pendientesQuery = `
@@ -2623,7 +2623,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
           FROM alumnos a
           JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado IN ('activa','pendiente')`;
 
-        // ⚠️ Los JOINs de filtro van ANTES del LEFT JOIN para que MySQL no los ignore
+        // âš ï¸ Los JOINs de filtro van ANTES del LEFT JOIN para que MySQL no los ignore
         if (deporte || grupo) {
           pendientesQuery += ' JOIN deportes d ON i.deporte_id = d.deporte_id';
         }
@@ -2632,7 +2632,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
                              ' JOIN horarios h ON h.horario_id = ih.horario_id';
         }
 
-        // LEFT JOIN al final — así pm.pago_id IS NULL funciona correctamente
+        // LEFT JOIN al final â€” asÃ­ pm.pago_id IS NULL funciona correctamente
         if (esSeptiembre) {
           pendientesQuery += ` LEFT JOIN pagos_mensuales pm ON pm.alumno_id = a.alumno_id AND LOWER(pm.mes) IN ('septiembre', 'setiembre') AND pm.\`${colYear}\` = ?`;
         } else {
@@ -2665,7 +2665,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       }
 
       if (todasFaltantes.length > 0) {
-        // Obtener montos solo una vez para todos los alumnos únicos
+        // Obtener montos solo una vez para todos los alumnos Ãºnicos
         const alumnoIdsUnicos = [...new Set(todasFaltantes.map(r => r.alumno_id))];
         const placeholders = alumnoIdsUnicos.map(() => '?').join(',');
         const montoParams = [...alumnoIdsUnicos];
@@ -2684,8 +2684,8 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         const montoMap = {};
         montos.forEach(row => { montoMap[row.alumno_id] = parseFloat(row.monto || 0); });
 
-        // Crear una fila virtual por cada alumno×mes faltante.
-        // El pago_id virtual usa -(alumnoId * 100 + mIdx) para ser único entre meses.
+        // Crear una fila virtual por cada alumnoÃ—mes faltante.
+        // El pago_id virtual usa -(alumnoId * 100 + mIdx) para ser Ãºnico entre meses.
         const faltantes = todasFaltantes.map(row => ({
           pago_id: -(row.alumno_id * 100 + row._mIdx),
           alumno_id: row.alumno_id,
@@ -2696,7 +2696,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
           telefono_apoderado: row.telefono_apoderado,
           mes: row._mes,
           [colYear]: filtroAnio,
-          año: filtroAnio,
+          aÃ±o: filtroAnio,
           monto: montoMap[row.alumno_id] || 0,
           estado: 'pendiente',
           comprobante_url: null,
@@ -2709,7 +2709,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
       }
     }
 
-    // Filtrar por año en JS (evita problemas de encoding con la columna ñ)
+    // Filtrar por aÃ±o en JS (evita problemas de encoding con la columna Ã±)
     if (anio) {
       pagos = pagos.filter(p => {
         const val = Object.values(p).find((v, i) => Object.keys(p)[i].length <= 4 && typeof v === 'number' && v > 2000 && v < 2100);
@@ -2783,7 +2783,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 
     res.json({ success: true, pagos });
   } catch (error) {
-    console.error('❌ Error al listar pagos mensuales:', error);
+    console.error('âŒ Error al listar pagos mensuales:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2805,7 +2805,7 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
     let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = COALESCE(fecha_pago, NOW()), observaciones = COALESCE(?, observaciones)`;
     const updateParams = [observaciones || null];
     
-    // Si se envía un monto ajustado, actualizar también
+    // Si se envÃ­a un monto ajustado, actualizar tambiÃ©n
     if (monto !== undefined && monto !== null) {
       updateQuery += `, monto = ?`;
       updateParams.push(parseFloat(monto));
@@ -2820,8 +2820,8 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
     if (deportes_pendientes && deportes_pendientes.length > 0) {
       const montoPendiente = deportes_pendientes.reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
       const nombresPendientes = deportes_pendientes.map(d => d.deporte).join(', ');
-      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
-      // Obtener el año del pago original
+      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'aÃ±o' â€” fallback unicode-safe
+      // Obtener el aÃ±o del pago original
       const [pagoOriginal] = await db.query('SELECT `' + colYear + '` as anio_val FROM pagos_mensuales WHERE pago_id = ?', [id]);
       const anioVal = pagoOriginal[0]?.anio_val || new Date().getFullYear();
       
@@ -2830,12 +2830,12 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
         " VALUES (?, ?, ?, ?, 'pendiente', ?, 'Pendiente de pago', NOW())",
         [pago[0].alumno_id, pago[0].mes, anioVal, montoPendiente, `Pendiente: ${nombresPendientes}`]
       );
-      console.log(`🟡 Pago pendiente creado para ${nombresPendientes} (S/ ${montoPendiente.toFixed(2)})`);
+      console.log(`ðŸŸ¡ Pago pendiente creado para ${nombresPendientes} (S/ ${montoPendiente.toFixed(2)})`);
     }
 
     res.json({ success: true, mensaje: 'Pago mensual confirmado' });
   } catch (error) {
-    console.error('❌ Error al confirmar pago mensual:', error);
+    console.error('âŒ Error al confirmar pago mensual:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2861,7 +2861,7 @@ app.put('/api/admin/pagos-mensuales/:id/rechazar', verificarAutenticacion, verif
 
     res.json({ success: true, mensaje: 'Pago mensual rechazado' });
   } catch (error) {
-    console.error('❌ Error al rechazar pago mensual:', error);
+    console.error('âŒ Error al rechazar pago mensual:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2882,9 +2882,9 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
 
     await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, id]);
 
-    res.json({ success: true, mensaje: 'Observación guardada' });
+    res.json({ success: true, mensaje: 'ObservaciÃ³n guardada' });
   } catch (error) {
-    console.error('❌ Error al guardar observación:', error);
+    console.error('âŒ Error al guardar observaciÃ³n:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2895,7 +2895,7 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
  */
 /**
  * PUT /api/admin/pagos-mensuales/:id/comprobante
- * Actualizar comprobante o número de operación de un pago mensual
+ * Actualizar comprobante o nÃºmero de operaciÃ³n de un pago mensual
  */
 app.put('/api/admin/pagos-mensuales/:id/comprobante', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
@@ -2909,7 +2909,7 @@ app.put('/api/admin/pagos-mensuales/:id/comprobante', verificarAutenticacion, ve
 
     res.json({ success: true, mensaje: 'Comprobante actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error al actualizar comprobante mensual:', error);
+    console.error('âŒ Error al actualizar comprobante mensual:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2920,7 +2920,7 @@ app.put('/api/admin/pagos-mensuales/:id/monto', verificarAutenticacion, verifica
     const { monto } = req.body;
 
     if (monto === undefined || monto === null || isNaN(parseFloat(monto)) || parseFloat(monto) < 0) {
-      return res.status(400).json({ success: false, error: 'Monto inválido' });
+      return res.status(400).json({ success: false, error: 'Monto invÃ¡lido' });
     }
 
     const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
@@ -2932,7 +2932,7 @@ app.put('/api/admin/pagos-mensuales/:id/monto', verificarAutenticacion, verifica
 
     res.json({ success: true, mensaje: 'Monto actualizado' });
   } catch (error) {
-    console.error('❌ Error al actualizar monto:', error);
+    console.error('âŒ Error al actualizar monto:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2955,7 +2955,7 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
     if (!['pausar', 'reactivar'].includes(accion)) {
       return res.status(400).json({
         success: false,
-        error: 'Acción inválida. Use: pausar o reactivar'
+        error: 'AcciÃ³n invÃ¡lida. Use: pausar o reactivar'
       });
     }
     
@@ -2974,7 +2974,7 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
     
     const alumnoId = alumnos[0].alumno_id;
     
-    // Verificar que la inscripción pertenece al alumno
+    // Verificar que la inscripciÃ³n pertenece al alumno
     const [inscripciones] = await db.query(
       'SELECT inscripcion_id, estado FROM inscripciones WHERE inscripcion_id = ? AND alumno_id = ?',
       [inscripcion_id, alumnoId]
@@ -2983,14 +2983,14 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
     if (inscripciones.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Inscripción no encontrada o no pertenece al alumno'
+        error: 'InscripciÃ³n no encontrada o no pertenece al alumno'
       });
     }
     
     const estadoActual = inscripciones[0].estado;
     const nuevoEstado = accion === 'pausar' ? 'suspendida' : 'activa';
     
-    // Validar transición de estado
+    // Validar transiciÃ³n de estado
     if (accion === 'pausar' && estadoActual !== 'activa') {
       return res.status(400).json({
         success: false,
@@ -3005,15 +3005,15 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
       });
     }
     
-    // Actualizar estado de la inscripción
+    // Actualizar estado de la inscripciÃ³n
     await db.query(
       'UPDATE inscripciones SET estado = ? WHERE inscripcion_id = ?',
       [nuevoEstado, inscripcion_id]
     );
     
-    console.log(`✅ Inscripción ${inscripcion_id} ${accion === 'pausar' ? 'pausada' : 'reactivada'} para DNI ${dni}`);
+    console.log(`âœ… InscripciÃ³n ${inscripcion_id} ${accion === 'pausar' ? 'pausada' : 'reactivada'} para DNI ${dni}`);
     
-    // Invalidar caché
+    // Invalidar cachÃ©
     invalidateDNICache(dni);
     
     res.json({
@@ -3023,7 +3023,7 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error al toggle deporte:', error);
+    console.error('âŒ Error al toggle deporte:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Error al cambiar estado del deporte'
@@ -3033,7 +3033,7 @@ app.post('/api/alumno/toggle-deporte', async (req, res) => {
 
 /**
  * POST /api/alumno/cancelar-deporte
- * Cancelar (dejar) un deporte inscrito — elimina la inscripción y libera los horarios
+ * Cancelar (dejar) un deporte inscrito â€” elimina la inscripciÃ³n y libera los horarios
  */
 app.post('/api/alumno/cancelar-deporte', async (req, res) => {
   try {
@@ -3051,7 +3051,7 @@ app.post('/api/alumno/cancelar-deporte', async (req, res) => {
     }
     const alumnoId = alumnos[0].alumno_id;
 
-    // Verificar inscripción pertenece al alumno y está activa o suspendida
+    // Verificar inscripciÃ³n pertenece al alumno y estÃ¡ activa o suspendida
     const [inscRows] = await db.query(`
       SELECT i.inscripcion_id, i.estado, d.nombre as deporte
       FROM inscripciones i
@@ -3060,12 +3060,12 @@ app.post('/api/alumno/cancelar-deporte', async (req, res) => {
     `, [inscripcion_id, alumnoId]);
 
     if (inscRows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada o no se puede cancelar' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada o no se puede cancelar' });
     }
 
     const deporte = inscRows[0].deporte;
 
-    // Contar cuántos horarios se liberan
+    // Contar cuÃ¡ntos horarios se liberan
     const [horarios] = await db.query('SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcion_id]);
     const diasLiberados = horarios[0].total;
 
@@ -3075,10 +3075,10 @@ app.post('/api/alumno/cancelar-deporte', async (req, res) => {
     // Cambiar estado a cancelada
     await db.query("UPDATE inscripciones SET estado = 'cancelada' WHERE inscripcion_id = ?", [inscripcion_id]);
 
-    // Invalidar caché
+    // Invalidar cachÃ©
     invalidateDNICache(dni);
 
-    console.log(`🗑️ Inscripción ${inscripcion_id} (${deporte}) cancelada para DNI ${dni}. ${diasLiberados} horarios liberados.`);
+    console.log(`ðŸ—‘ï¸ InscripciÃ³n ${inscripcion_id} (${deporte}) cancelada para DNI ${dni}. ${diasLiberados} horarios liberados.`);
 
     res.json({
       success: true,
@@ -3088,14 +3088,14 @@ app.post('/api/alumno/cancelar-deporte', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error al cancelar deporte:', error);
+    console.error('âŒ Error al cancelar deporte:', error);
     res.status(500).json({ success: false, error: error.message || 'Error al cancelar el deporte' });
   }
 });
 
-// ==================== ENDPOINTS ADMINISTRACIÓN ====================
+// ==================== ENDPOINTS ADMINISTRACIÃ“N ====================
 
-// ==================== ENDPOINTS ADMINISTRACIÓN ====================
+// ==================== ENDPOINTS ADMINISTRACIÃ“N ====================
 
 // Login de administrador con JWT y bcrypt
 app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
@@ -3110,7 +3110,7 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Datos incompletos',
-        message: 'Usuario/Email y contraseña son requeridos'
+        message: 'Usuario/Email y contraseÃ±a son requeridos'
       });
     }
     
@@ -3123,23 +3123,23 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
     if (admins.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Credenciales inválidas',
-        message: 'Usuario/Email o contraseña incorrectos'
+        error: 'Credenciales invÃ¡lidas',
+        message: 'Usuario/Email o contraseÃ±a incorrectos'
       });
     }
     
     const admin = admins[0];
     
-    // Verificar si está bloqueado
+    // Verificar si estÃ¡ bloqueado
     if (admin.locked_until && new Date(admin.locked_until) > new Date()) {
       return res.status(423).json({
         success: false,
         error: 'Cuenta bloqueada',
-        message: 'Demasiados intentos fallidos. Intente más tarde.'
+        message: 'Demasiados intentos fallidos. Intente mÃ¡s tarde.'
       });
     }
     
-    // Verificar contraseña
+    // Verificar contraseÃ±a
     const passwordMatch = await bcrypt.compare(passwordInput, admin.password_hash);
     
     if (!passwordMatch) {
@@ -3160,12 +3160,12 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
       
       return res.status(401).json({
         success: false,
-        error: 'Credenciales inválidas',
-        message: 'Usuario/Email o contraseña incorrectos'
+        error: 'Credenciales invÃ¡lidas',
+        message: 'Usuario/Email o contraseÃ±a incorrectos'
       });
     }
     
-    // Login exitoso - resetear intentos y actualizar último acceso
+    // Login exitoso - resetear intentos y actualizar Ãºltimo acceso
     await db.query(
       'UPDATE administradores SET failed_login_attempts = 0, locked_until = NULL, ultimo_acceso = NOW() WHERE admin_id = ?',
       [admin.admin_id]
@@ -3192,7 +3192,7 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
       message: 'Login exitoso'
     });
   } catch (error) {
-    console.error('❌ Error en login admin:', error);
+    console.error('âŒ Error en login admin:', error);
     res.status(500).json({ 
       success: false, 
       error: 'Error en el servidor',
@@ -3203,7 +3203,7 @@ app.post('/api/admin/login', rateLimiterLogin, async (req, res) => {
 
 /**
  * GET /api/configuracion/matricula_activa
- * Endpoint público para que el frontend verifique si se cobra matrícula
+ * Endpoint pÃºblico para que el frontend verifique si se cobra matrÃ­cula
  */
 app.get('/api/configuracion/matricula_activa', async (req, res) => {
   try {
@@ -3241,17 +3241,17 @@ app.get('/api/admin/configuracion', verificarAutenticacion, verificarAdmin, asyn
       configuraciones: configParsed
     });
   } catch (error) {
-    console.error('❌ Error al obtener configuración:', error);
+    console.error('âŒ Error al obtener configuraciÃ³n:', error);
     res.status(500).json({
       success: false,
-      error: 'Error al obtener configuración'
+      error: 'Error al obtener configuraciÃ³n'
     });
   }
 });
 
 /**
  * PUT /api/admin/configuracion/:clave
- * Actualizar una configuración específica
+ * Actualizar una configuraciÃ³n especÃ­fica
  */
 app.put('/api/admin/configuracion/:clave', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
@@ -3281,19 +3281,19 @@ app.put('/api/admin/configuracion/:clave', verificarAutenticacion, verificarAdmi
       );
     }
     
-    console.log(`✅ Configuración actualizada: ${clave} = ${valorStr}`);
+    console.log(`âœ… ConfiguraciÃ³n actualizada: ${clave} = ${valorStr}`);
     
     res.json({
       success: true,
-      message: 'Configuración actualizada',
+      message: 'ConfiguraciÃ³n actualizada',
       clave,
       valor: valor
     });
   } catch (error) {
-    console.error('❌ Error al actualizar configuración:', error);
+    console.error('âŒ Error al actualizar configuraciÃ³n:', error);
     res.status(500).json({
       success: false,
-      error: 'Error al actualizar configuración'
+      error: 'Error al actualizar configuraciÃ³n'
     });
   }
 });
@@ -3303,17 +3303,17 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
   try {
     const { dia, deporte, refresh } = req.query;
     
-    // Crear clave de caché única basada en los filtros
+    // Crear clave de cachÃ© Ãºnica basada en los filtros
     const cacheKey = `inscritos_${dia || 'all'}_${deporte || 'all'}`;
     
-    // Intentar obtener del caché
+    // Intentar obtener del cachÃ©
     const cachedData = cache.get(cacheKey);
     if (cachedData && refresh !== 'true') {
-      console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
+      console.log(`âš¡ CACHÃ‰ HIT: ${cacheKey}`);
       return res.json(cachedData);
     }
     
-    console.log(`🌐 CACHÉ MISS: ${cacheKey} - Consultando MySQL`);
+    console.log(`ðŸŒ CACHÃ‰ MISS: ${cacheKey} - Consultando MySQL`);
     
     // ==================== CONSULTAR DESDE MYSQL ====================
     if (db) {
@@ -3394,7 +3394,11 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           estado_pago: row.estado_pago,
           fecha_registro: row.fecha_registro,
           foto_carnet_url: row.foto_carnet_url || null,
-          dni_frontal_url: row.dni_frontal_url || null
+          dni_frontal_url: row.dni_frontal_url || null,
+          numero_operacion: row.numero_operacion || '',
+          comprobante_pago_url: row.comprobante_pago_url || null,
+          fecha_pago: row.fecha_pago || null,
+          monto_pago: row.monto_pago || null
         }));
         
         const data = {
@@ -3405,13 +3409,13 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
           source: 'mysql'
         };
         
-        // Guardar en caché
+        // Guardar en cachÃ©
         cache.set(cacheKey, data, CACHE_TTL.inscritos);
-        console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.inscritos}s, total: ${alumnosConDatos.length})`);
+        console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.inscritos}s, total: ${alumnosConDatos.length})`);
         
         return res.json(data);
       } catch (mysqlError) {
-        console.error('❌ Error en MySQL:', mysqlError);
+        console.error('âŒ Error en MySQL:', mysqlError);
         // Continuar con Google Sheets como fallback
       }
     }
@@ -3434,13 +3438,13 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
       throw new Error(data.error || 'Error al listar inscritos');
     }
 
-    // Guardar en caché
+    // Guardar en cachÃ©
     cache.set(cacheKey, data, CACHE_TTL.inscritos);
-    console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.inscritos}s)`);
+    console.log(`ðŸ’¾ CACHÃ‰ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.inscritos}s)`);
 
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al listar inscritos:', error);
+    console.error('âŒ Error al listar inscritos:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al listar inscritos' 
@@ -3448,7 +3452,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
   }
 });
 
-// Cambiar contraseña del administrador actual (PROTEGIDO)
+// Cambiar contraseÃ±a del administrador actual (PROTEGIDO)
 app.post('/api/admin/cambiar-password', verificarAutenticacion, verificarAdmin, rateLimiterAdmin, async (req, res) => {
   try {
     const { password_actual, password_nueva } = req.body;
@@ -3457,14 +3461,14 @@ app.post('/api/admin/cambiar-password', verificarAutenticacion, verificarAdmin, 
     if (!password_actual || !password_nueva) {
       return res.status(400).json({
         success: false,
-        error: 'Se requiere la contraseña actual y la nueva contraseña'
+        error: 'Se requiere la contraseÃ±a actual y la nueva contraseÃ±a'
       });
     }
 
     if (password_nueva.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'La nueva contraseña debe tener al menos 6 caracteres'
+        error: 'La nueva contraseÃ±a debe tener al menos 6 caracteres'
       });
     }
 
@@ -3478,16 +3482,16 @@ app.post('/api/admin/cambiar-password', verificarAutenticacion, verificarAdmin, 
       return res.status(404).json({ success: false, error: 'Administrador no encontrado' });
     }
 
-    // Verificar contraseña actual
+    // Verificar contraseÃ±a actual
     const passwordMatch = await bcrypt.compare(password_actual, admins[0].password_hash);
     if (!passwordMatch) {
-      return res.status(401).json({ success: false, error: 'Contraseña actual incorrecta' });
+      return res.status(401).json({ success: false, error: 'ContraseÃ±a actual incorrecta' });
     }
 
-    // Generar hash de la nueva contraseña
+    // Generar hash de la nueva contraseÃ±a
     const newPasswordHash = await bcrypt.hash(password_nueva, 10);
 
-    // Actualizar contraseña
+    // Actualizar contraseÃ±a
     await db.query(
       'UPDATE administradores SET password_hash = ?, updated_at = NOW() WHERE admin_id = ?',
       [newPasswordHash, adminId]
@@ -3495,10 +3499,10 @@ app.post('/api/admin/cambiar-password', verificarAutenticacion, verificarAdmin, 
 
     res.json({
       success: true,
-      message: 'Contraseña actualizada correctamente'
+      message: 'ContraseÃ±a actualizada correctamente'
     });
   } catch (error) {
-    console.error('❌ Error al cambiar contraseña:', error);
+    console.error('âŒ Error al cambiar contraseÃ±a:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -3527,7 +3531,7 @@ app.post('/api/admin/crear-usuario', verificarAutenticacion, verificarAdmin, rat
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'La contraseña debe tener al menos 6 caracteres'
+        error: 'La contraseÃ±a debe tener al menos 6 caracteres'
       });
     }
 
@@ -3540,11 +3544,11 @@ app.post('/api/admin/crear-usuario', verificarAutenticacion, verificarAdmin, rat
     if (existing.length > 0) {
       return res.status(400).json({
         success: false,
-        error: 'El usuario o email ya están registrados'
+        error: 'El usuario o email ya estÃ¡n registrados'
       });
     }
 
-    // Hash de la contraseña
+    // Hash de la contraseÃ±a
     const passwordHash = await bcrypt.hash(password, 10);
 
     // Crear usuario
@@ -3560,7 +3564,7 @@ app.post('/api/admin/crear-usuario', verificarAutenticacion, verificarAdmin, rat
       admin_id: result.insertId
     });
   } catch (error) {
-    console.error('❌ Error al crear usuario:', error);
+    console.error('âŒ Error al crear usuario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -3580,7 +3584,7 @@ app.get('/api/admin/usuarios', verificarAutenticacion, verificarAdmin, rateLimit
       usuarios
     });
   } catch (error) {
-    console.error('❌ Error al listar usuarios:', error);
+    console.error('âŒ Error al listar usuarios:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -3600,7 +3604,7 @@ app.delete('/api/admin/usuarios/:id', verificarAutenticacion, verificarAdmin, ra
       });
     }
 
-    // No puede eliminarse a sí mismo
+    // No puede eliminarse a sÃ­ mismo
     if (parseInt(id) === adminIdActual) {
       return res.status(400).json({
         success: false,
@@ -3615,21 +3619,21 @@ app.delete('/api/admin/usuarios/:id', verificarAutenticacion, verificarAdmin, ra
       message: 'Usuario eliminado correctamente'
     });
   } catch (error) {
-    console.error('❌ Error al eliminar usuario:', error);
+    console.error('âŒ Error al eliminar usuario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Obtener estadísticas financieras detalladas (PROTEGIDO)
+// Obtener estadÃ­sticas financieras detalladas (PROTEGIDO)
 app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificarAdmin, rateLimiterAdmin, async (req, res) => {
   try {
-    // CALCULAR DIRECTAMENTE DESDE MYSQL PARA PRECISIÓN EXACTA
+    // CALCULAR DIRECTAMENTE DESDE MYSQL PARA PRECISIÃ“N EXACTA
     if (!db) {
       throw new Error('Base de datos no disponible');
     }
 
     // 1. RESUMEN GENERAL - Solo inscripciones activas
-    // MATRÍCULA: S/ 20.00 por cada inscripción activa (sin importar matricula_pagada)
+    // MATRÃCULA: S/ 20.00 por cada inscripciÃ³n activa (sin importar matricula_pagada)
     const [resumenGeneral] = await db.query(`
       SELECT 
         COUNT(DISTINCT i.alumno_id) as total_alumnos_activos,
@@ -3643,7 +3647,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
     `);
 
     // 2. INGRESOS DEL MES ACTUAL - Combina mensualidades confirmadas en pagos_mensuales y nuevas inscripciones
-    const colYear = global.COL_ANIO || 'año';
+    const colYear = global.COL_ANIO || 'aÃ±o';
     const [mesPagosMensuales] = await db.query(`
       SELECT COALESCE(SUM(pm.monto), 0) as total_pm_mes
       FROM pagos_mensuales pm
@@ -3725,10 +3729,10 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       `);
       desgloseMensual = desglose;
     } catch (errDesglose) {
-      console.warn('⚠️ No se pudo generar desglose mensual:', errDesglose.message);
+      console.warn('âš ï¸ No se pudo generar desglose mensual:', errDesglose.message);
     }
 
-    // 4. ESTADÍSTICAS POR DEPORTE - Solo inscripciones activas
+    // 4. ESTADÃSTICAS POR DEPORTE - Solo inscripciones activas
     const [porDeporte] = await db.query(`
       SELECT 
         d.nombre as deporte,
@@ -3743,7 +3747,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       ORDER BY total DESC
     `);
 
-    // 5. ESTADÍSTICAS POR ALUMNO (TOP 20) - Solo con inscripciones activas
+    // 5. ESTADÃSTICAS POR ALUMNO (TOP 20) - Solo con inscripciones activas
     const [porAlumno] = await db.query(`
       SELECT 
         a.dni,
@@ -3798,7 +3802,7 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       timestamp: new Date().toISOString()
     };
 
-    console.log('📊 Estadísticas financieras calculadas:', {
+    console.log('ðŸ“Š EstadÃ­sticas financieras calculadas:', {
       alumnos: estadisticas.resumen.totalAlumnosActivos,
       inscripciones: estadisticas.resumen.totalInscripcionesActivas,
       ingresos: `S/ ${estadisticas.resumen.totalIngresosActivos.toFixed(2)}`
@@ -3810,22 +3814,22 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
     });
 
   } catch (error) {
-    console.error('❌ Error al obtener estadísticas financieras:', error);
+    console.error('âŒ Error al obtener estadÃ­sticas financieras:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message || 'Error al obtener estadísticas' 
+      error: error.message || 'Error al obtener estadÃ­sticas' 
     });
   }
 });
 
-// ==================== FIN ENDPOINTS ADMINISTRACIÓN ====================
+// ==================== FIN ENDPOINTS ADMINISTRACIÃ“N ====================
 
-// Endpoint: Obtener inscripciones activas de un alumno por DNI (para modal de desactivación selectiva)
+// Endpoint: Obtener inscripciones activas de un alumno por DNI (para modal de desactivaciÃ³n selectiva)
 app.get('/api/admin/inscripciones-alumno/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { dni } = req.params;
     if (!dni || dni.length < 8) {
-      return res.status(400).json({ success: false, error: 'DNI inválido' });
+      return res.status(400).json({ success: false, error: 'DNI invÃ¡lido' });
     }
 
     const [alumnoRows] = await db.query('SELECT alumno_id, nombres, apellido_paterno, apellido_materno, estado FROM alumnos WHERE dni = ?', [dni]);
@@ -3865,7 +3869,7 @@ app.post('/api/admin/desactivar-inscripciones', verificarAutenticacion, verifica
 
     const idsValidos = inscripcion_ids.filter(id => Number.isInteger(Number(id))).map(Number);
     if (idsValidos.length === 0) {
-      return res.status(400).json({ success: false, error: 'IDs de inscripción inválidos' });
+      return res.status(400).json({ success: false, error: 'IDs de inscripciÃ³n invÃ¡lidos' });
     }
 
     const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
@@ -3887,15 +3891,15 @@ app.post('/api/admin/desactivar-inscripciones', verificarAutenticacion, verifica
 
     if (restantes[0].total === 0) {
       await db.query(`UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?`, [alumnoId]);
-      console.log(`🔴 Alumno ${dni} marcado como inactivo (sin inscripciones activas)`);
+      console.log(`ðŸ”´ Alumno ${dni} marcado como inactivo (sin inscripciones activas)`);
     }
 
     invalidateDNICache(dni);
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(inscritosKeys);
 
-    console.log(`✅ Desactivadas ${idsValidos.length} inscripciones de ${dni}`);
-    res.json({ success: true, message: `Se desactivaron ${idsValidos.length} inscripción(es)`, alumno_inactivo: restantes[0].total === 0 });
+    console.log(`âœ… Desactivadas ${idsValidos.length} inscripciones de ${dni}`);
+    res.json({ success: true, message: `Se desactivaron ${idsValidos.length} inscripciÃ³n(es)`, alumno_inactivo: restantes[0].total === 0 });
   } catch (error) {
     console.error('Error al desactivar inscripciones:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -3913,7 +3917,7 @@ app.post('/api/admin/reactivar-inscripciones', verificarAutenticacion, verificar
 
     const idsValidos = inscripcion_ids.filter(id => Number.isInteger(Number(id))).map(Number);
     if (idsValidos.length === 0) {
-      return res.status(400).json({ success: false, error: 'IDs de inscripción inválidos' });
+      return res.status(400).json({ success: false, error: 'IDs de inscripciÃ³n invÃ¡lidos' });
     }
 
     const [alumnoRows] = await db.query('SELECT alumno_id, estado FROM alumnos WHERE dni = ?', [dni]);
@@ -3931,15 +3935,15 @@ app.post('/api/admin/reactivar-inscripciones', verificarAutenticacion, verificar
     // Si el alumno estaba inactivo, reactivarlo
     if (alumnoRows[0].estado === 'inactivo') {
       await db.query(`UPDATE alumnos SET estado = 'activo' WHERE alumno_id = ?`, [alumnoId]);
-      console.log(`🟢 Alumno ${dni} reactivado automáticamente`);
+      console.log(`ðŸŸ¢ Alumno ${dni} reactivado automÃ¡ticamente`);
     }
 
     invalidateDNICache(dni);
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(inscritosKeys);
 
-    console.log(`✅ Reactivadas ${idsValidos.length} inscripciones de ${dni}`);
-    res.json({ success: true, message: `Se reactivaron ${idsValidos.length} inscripción(es)` });
+    console.log(`âœ… Reactivadas ${idsValidos.length} inscripciones de ${dni}`);
+    res.json({ success: true, message: `Se reactivaron ${idsValidos.length} inscripciÃ³n(es)` });
   } catch (error) {
     console.error('Error al reactivar inscripciones:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -3954,14 +3958,14 @@ app.post('/api/desactivar-usuario', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
     // ==================== DESACTIVAR EN MYSQL ====================
     if (db) {
       try {
-        console.log(`🔴 Desactivando usuario DNI ${dni} en MySQL...`);
+        console.log(`ðŸ”´ Desactivando usuario DNI ${dni} en MySQL...`);
         
         // Actualizar estado del alumno a 'inactivo'
         await db.query(
@@ -3978,22 +3982,22 @@ app.post('/api/desactivar-usuario', async (req, res) => {
         if (alumnoRows.length > 0) {
           const alumnoId = alumnoRows[0].alumno_id;
           
-          // Desactivar todas las inscripciones del alumno (usar 'cancelada' según ENUM)
+          // Desactivar todas las inscripciones del alumno (usar 'cancelada' segÃºn ENUM)
           await db.query(
             `UPDATE inscripciones SET estado = 'cancelada' WHERE alumno_id = ?`,
             [alumnoId]
           );
           
-          console.log(`✅ Usuario ${dni} desactivado en MySQL (estado: cancelada)`);
+          console.log(`âœ… Usuario ${dni} desactivado en MySQL (estado: cancelada)`);
         }
         
-        // INVALIDAR CACHÉ
+        // INVALIDAR CACHÃ‰
         invalidateDNICache(dni);
         const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
         cache.del(inscritosKeys);
-        console.log('🗑️ CACHÉ INVALIDADO tras desactivar usuario');
+        console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras desactivar usuario');
         
-        // También sincronizar con Google Sheets como backup
+        // TambiÃ©n sincronizar con Google Sheets como backup
         try {
           await fetch(APPS_SCRIPT_URL, {
             method: 'POST',
@@ -4004,9 +4008,9 @@ app.post('/api/desactivar-usuario', async (req, res) => {
               dni: dni
             })
           });
-          console.log('📊 Sincronizado con Google Sheets');
+          console.log('ðŸ“Š Sincronizado con Google Sheets');
         } catch (sheetError) {
-          console.warn('⚠️ No se pudo sincronizar con Sheets:', sheetError.message);
+          console.warn('âš ï¸ No se pudo sincronizar con Sheets:', sheetError.message);
         }
         
         return res.json({
@@ -4015,7 +4019,7 @@ app.post('/api/desactivar-usuario', async (req, res) => {
         });
         
       } catch (mysqlError) {
-        console.error('❌ Error en MySQL:', mysqlError);
+        console.error('âŒ Error en MySQL:', mysqlError);
         throw mysqlError;
       }
     }
@@ -4039,15 +4043,15 @@ app.post('/api/desactivar-usuario', async (req, res) => {
       throw new Error(data.error || 'Error al desactivar usuario');
     }
     
-    // INVALIDAR CACHÉ después de desactivar usuario
+    // INVALIDAR CACHÃ‰ despuÃ©s de desactivar usuario
     invalidateDNICache(dni);
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(inscritosKeys);
-    console.log('🗑️ CACHÉ INVALIDADO tras desactivar usuario');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras desactivar usuario');
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al desactivar usuario:', error);
+    console.error('âŒ Error al desactivar usuario:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al desactivar usuario' 
@@ -4063,14 +4067,14 @@ app.post('/api/reactivar-usuario', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
     // ==================== REACTIVAR EN MYSQL ====================
     if (db) {
       try {
-        console.log(`🟢 Reactivando usuario DNI ${dni} en MySQL...`);
+        console.log(`ðŸŸ¢ Reactivando usuario DNI ${dni} en MySQL...`);
         
         // Actualizar estado del alumno a 'activo'
         await db.query(
@@ -4093,16 +4097,16 @@ app.post('/api/reactivar-usuario', async (req, res) => {
             [alumnoId]
           );
           
-          console.log(`✅ Usuario ${dni} reactivado en MySQL (inscripciones: cancelada → activa)`);
+          console.log(`âœ… Usuario ${dni} reactivado en MySQL (inscripciones: cancelada â†’ activa)`);
         }
         
-        // INVALIDAR CACHÉ
+        // INVALIDAR CACHÃ‰
         invalidateDNICache(dni);
         const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
         cache.del(inscritosKeys);
-        console.log('🗑️ CACHÉ INVALIDADO tras reactivar usuario');
+        console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras reactivar usuario');
         
-        // También sincronizar con Google Sheets como backup
+        // TambiÃ©n sincronizar con Google Sheets como backup
         try {
           await fetch(APPS_SCRIPT_URL, {
             method: 'POST',
@@ -4113,9 +4117,9 @@ app.post('/api/reactivar-usuario', async (req, res) => {
               dni: dni
             })
           });
-          console.log('📊 Sincronizado con Google Sheets');
+          console.log('ðŸ“Š Sincronizado con Google Sheets');
         } catch (sheetError) {
-          console.warn('⚠️ No se pudo sincronizar con Sheets:', sheetError.message);
+          console.warn('âš ï¸ No se pudo sincronizar con Sheets:', sheetError.message);
         }
         
         return res.json({
@@ -4124,7 +4128,7 @@ app.post('/api/reactivar-usuario', async (req, res) => {
         });
         
       } catch (mysqlError) {
-        console.error('❌ Error en MySQL:', mysqlError);
+        console.error('âŒ Error en MySQL:', mysqlError);
         throw mysqlError;
       }
     }
@@ -4148,15 +4152,15 @@ app.post('/api/reactivar-usuario', async (req, res) => {
       throw new Error(data.error || 'Error al reactivar usuario');
     }
     
-    // INVALIDAR CACHÉ después de reactivar usuario
+    // INVALIDAR CACHÃ‰ despuÃ©s de reactivar usuario
     invalidateDNICache(dni);
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(inscritosKeys);
-    console.log('🗑️ CACHÉ INVALIDADO tras reactivar usuario');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras reactivar usuario');
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al reactivar usuario:', error);
+    console.error('âŒ Error al reactivar usuario:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al reactivar usuario' 
@@ -4172,7 +4176,7 @@ app.post('/api/activar-inscripciones/:dni', async (req, res) => {
     if (!dni || dni.length < 8) {
       return res.status(400).json({
         success: false,
-        error: 'DNI inválido'
+        error: 'DNI invÃ¡lido'
       });
     }
     
@@ -4185,17 +4189,17 @@ app.post('/api/activar-inscripciones/:dni', async (req, res) => {
       throw new Error(data.error || 'Error al activar inscripciones');
     }
     
-    // INVALIDAR CACHÉ después de activar inscripciones
+    // INVALIDAR CACHÃ‰ despuÃ©s de activar inscripciones
     invalidateDNICache(dni);
     const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     cache.del(horariosKeys);
     cache.del(inscritosKeys);
-    console.log('🗑️ CACHÉ INVALIDADO tras activar inscripciones');
+    console.log('ðŸ—‘ï¸ CACHÃ‰ INVALIDADO tras activar inscripciones');
     
     res.json(data);
   } catch (error) {
-    console.error('❌ Error al activar inscripciones:', error);
+    console.error('âŒ Error al activar inscripciones:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al activar inscripciones' 
@@ -4203,14 +4207,14 @@ app.post('/api/activar-inscripciones/:dni', async (req, res) => {
   }
 });
 
-// ==================== ENDPOINT PÚBLICO DE RANKING ====================
-// Ranking público para mostrar en la página principal
+// ==================== ENDPOINT PÃšBLICO DE RANKING ====================
+// Ranking pÃºblico para mostrar en la pÃ¡gina principal
 app.get('/api/public/ranking', async (req, res) => {
     try {
         const mesActual = new Date().getMonth() + 1;
         const anioActual = new Date().getFullYear();
         
-        // Función auxiliar para convertir URLs de Google Drive a formato de imagen directa
+        // FunciÃ³n auxiliar para convertir URLs de Google Drive a formato de imagen directa
         function convertirUrlDrive(url) {
             if (!url) return null;
             
@@ -4223,7 +4227,7 @@ app.get('/api/public/ranking', async (req, res) => {
             // Formato: https://drive.google.com/file/d/ID/view?...
             const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
             if (match && match[1]) {
-                // Usar el formato de thumbnail de Google que es más confiable
+                // Usar el formato de thumbnail de Google que es mÃ¡s confiable
                 return `https://lh3.googleusercontent.com/d/${match[1]}`;
             }
             
@@ -4250,7 +4254,7 @@ app.get('/api/public/ranking', async (req, res) => {
             LIMIT 10
         `, [mesActual, anioActual]);
         
-        // Si no hay datos del mes actual, devolver array vacío
+        // Si no hay datos del mes actual, devolver array vacÃ­o
         if (!ranking || ranking.length === 0) {
             return res.json({
                 success: true,
@@ -4278,7 +4282,7 @@ app.get('/api/public/ranking', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Error obteniendo ranking público:', error);
+        console.error('Error obteniendo ranking pÃºblico:', error);
         res.status(500).json({
             success: false,
             error: 'Error al obtener ranking',
@@ -4322,7 +4326,7 @@ app.post('/api/admin/docentes', verificarAutenticacion, verificarAdmin, async (r
         if (!nombre_completo || !usuario || !email || !password) {
             return res.status(400).json({ success: false, error: 'Faltan campos requeridos' });
         }
-        // Verificar usuario/email únicos
+        // Verificar usuario/email Ãºnicos
         const [existe] = await db.query('SELECT admin_id FROM administradores WHERE usuario = ? OR email = ?', [usuario, email]);
         if (existe.length > 0) {
             return res.status(400).json({ success: false, error: 'El usuario o email ya existe' });
@@ -4374,14 +4378,14 @@ app.put('/api/admin/docentes/:adminId/password', verificarAutenticacion, verific
         const { adminId } = req.params;
         const { password } = req.body;
         if (!password || password.length < 8) {
-            return res.status(400).json({ success: false, error: 'La contraseña debe tener al menos 8 caracteres' });
+            return res.status(400).json({ success: false, error: 'La contraseÃ±a debe tener al menos 8 caracteres' });
         }
         const hash = await bcrypt.hash(password, 10);
         await db.query('UPDATE administradores SET password_hash = ? WHERE admin_id = ? AND rol = ?', [hash, adminId, 'profesor']);
         res.json({ success: true });
     } catch (error) {
         console.error('Error en PUT /api/admin/docentes/password:', error);
-        res.status(500).json({ success: false, error: 'Error al actualizar contraseña' });
+        res.status(500).json({ success: false, error: 'Error al actualizar contraseÃ±a' });
     }
 });
 
@@ -4402,7 +4406,7 @@ app.delete('/api/admin/docentes/:adminId', verificarAutenticacion, verificarAdmi
         await db.query('DELETE FROM sesiones WHERE admin_id = ? ', [adminId]).catch(() => {});
         // Eliminar el docente
         await db.query('DELETE FROM administradores WHERE admin_id = ? AND rol = ?', [adminId, 'profesor']);
-        console.log(`🗑️ Docente eliminado: ${docente.nombre_completo} (ID: ${adminId})`);
+        console.log(`ðŸ—‘ï¸ Docente eliminado: ${docente.nombre_completo} (ID: ${adminId})`);
         res.json({ success: true, message: 'Docente eliminado correctamente' });
     } catch (error) {
         console.error('Error en DELETE /api/admin/docentes:', error);
@@ -4449,7 +4453,7 @@ app.post('/api/admin/asignaciones-docentes', verificarAutenticacion, verificarAd
         if (!horario) return res.status(404).json({ success: false, error: 'Horario no encontrado' });
 
         const [existe] = await db.query('SELECT id FROM profesor_deportes WHERE admin_id = ? AND horario_id = ?', [admin_id, horario_id]);
-        if (existe.length > 0) return res.status(400).json({ success: false, error: 'Esta asignación ya existe' });
+        if (existe.length > 0) return res.status(400).json({ success: false, error: 'Esta asignaciÃ³n ya existe' });
 
         await db.query(
             'INSERT INTO profesor_deportes (admin_id, deporte_id, categoria, dia, horario_id) VALUES (?, ?, ?, ?, ?)',
@@ -4458,7 +4462,7 @@ app.post('/api/admin/asignaciones-docentes', verificarAutenticacion, verificarAd
         res.json({ success: true });
     } catch (error) {
         console.error('Error en POST /api/admin/asignaciones-docentes:', error);
-        res.status(500).json({ success: false, error: 'Error al crear asignación' });
+        res.status(500).json({ success: false, error: 'Error al crear asignaciÃ³n' });
     }
 });
 
@@ -4469,17 +4473,17 @@ app.delete('/api/admin/asignaciones-docentes/:id', verificarAutenticacion, verif
         res.json({ success: true });
     } catch (error) {
         console.error('Error en DELETE /api/admin/asignaciones-docentes:', error);
-        res.status(500).json({ success: false, error: 'Error al eliminar asignación' });
+        res.status(500).json({ success: false, error: 'Error al eliminar asignaciÃ³n' });
     }
 });
 
-// GET /api/admin/docente-clases/:adminId — Clases asignadas a un docente con conteo de alumnos
+// GET /api/admin/docente-clases/:adminId â€” Clases asignadas a un docente con conteo de alumnos
 app.get('/api/admin/docente-clases/:adminId', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
         const { adminId } = req.params;
         const adminIdNum = parseInt(adminId, 10);
         if (isNaN(adminIdNum) || adminIdNum <= 0) {
-            return res.status(400).json({ success: false, error: 'adminId inválido' });
+            return res.status(400).json({ success: false, error: 'adminId invÃ¡lido' });
         }
 
         const [rows] = await db.query(`
@@ -4518,7 +4522,7 @@ app.get('/api/admin/docente-clases/:adminId', verificarAutenticacion, verificarA
     }
 });
 
-// GET /api/admin/docente-clase-alumnos?horario_ids=1,2&fecha_inicio=X&fecha_fin=Y — Lista de alumnos con asistencia
+// GET /api/admin/docente-clase-alumnos?horario_ids=1,2&fecha_inicio=X&fecha_fin=Y â€” Lista de alumnos con asistencia
 app.get('/api/admin/docente-clase-alumnos', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
         const { horario_ids, fecha_inicio, fecha_fin } = req.query;
@@ -4527,7 +4531,7 @@ app.get('/api/admin/docente-clase-alumnos', verificarAutenticacion, verificarAdm
         }
         const ids = horario_ids.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
         if (ids.length === 0) {
-            return res.status(400).json({ success: false, error: 'horario_ids inválidos' });
+            return res.status(400).json({ success: false, error: 'horario_ids invÃ¡lidos' });
         }
         const placeholders = ids.map(() => '?').join(',');
 
@@ -4594,7 +4598,7 @@ app.get('/api/admin/horarios-disponibles', verificarAutenticacion, verificarAdmi
     }
 });
 
-// GET /api/admin/dias?deporte_id=X&categoria=Y  — días distintos para deporte+categoría
+// GET /api/admin/dias?deporte_id=X&categoria=Y  â€” dÃ­as distintos para deporte+categorÃ­a
 app.get('/api/admin/dias', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
         const { deporte_id, categoria } = req.query;
@@ -4607,7 +4611,7 @@ app.get('/api/admin/dias', verificarAutenticacion, verificarAdmin, async (req, r
         const [rows] = await db.query(`SELECT DISTINCT dia FROM horarios ${where} ORDER BY ${orden}`, params);
         res.json({ success: true, dias: rows.map(r => r.dia) });
     } catch (error) {
-        res.status(500).json({ success: false, error: 'Error al obtener días' });
+        res.status(500).json({ success: false, error: 'Error al obtener dÃ­as' });
     }
 });
 
@@ -4666,7 +4670,7 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
     }
 });
 
-// GET /api/admin/exportar-asistencias-json — datos para generar Excel en el cliente
+// GET /api/admin/exportar-asistencias-json â€” datos para generar Excel en el cliente
 app.get('/api/admin/exportar-asistencias-json', verificarAutenticacion, verificarAdmin, async (req, res) => {
     try {
         const { fecha_inicio, fecha_fin, deporte_id, categoria, dia } = req.query;
@@ -4731,7 +4735,7 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
             ORDER BY ast.fecha, d.nombre, h.categoria, h.dia, a.apellido_paterno
         `, params);
 
-        // Función para escapar valores CSV (comillas dobles si contiene coma/comilla/salto)
+        // FunciÃ³n para escapar valores CSV (comillas dobles si contiene coma/comilla/salto)
         const esc = (v) => {
             const s = v == null ? '' : String(v).trim();
             return s.includes(';') || s.includes('"') || s.includes('\n')
@@ -4739,7 +4743,7 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
         };
 
         const SEP = ';';
-        const headers = ['Fecha', 'Deporte', 'Categoría', 'Día', 'Hora Inicio', 'Hora Fin', 'Alumno', 'DNI', 'Asistencia'];
+        const headers = ['Fecha', 'Deporte', 'CategorÃ­a', 'DÃ­a', 'Hora Inicio', 'Hora Fin', 'Alumno', 'DNI', 'Asistencia'];
         const lines = [headers.join(SEP)];
 
         for (const r of rows) {
@@ -4756,7 +4760,7 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
             ].join(SEP));
         }
 
-        // BOM UTF-8 para que Excel detecte la codificación correctamente
+        // BOM UTF-8 para que Excel detecte la codificaciÃ³n correctamente
         const csv = '\uFEFF' + lines.join('\r\n');
 
         const filename = `Asistencias_${fecha_inicio}_${fecha_fin}.csv`;
@@ -4772,18 +4776,18 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
 // ==================== ENDPOINTS DE PROFESOR ====================
 
 // GET /api/profesor/mis-clases?dia=Lunes
-// Devuelve las clases del profesor para el día indicado (o todas si no se especifica)
+// Devuelve las clases del profesor para el dÃ­a indicado (o todas si no se especifica)
 app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
         const diaParam = req.query.dia ? req.query.dia.toUpperCase() : null;
         const fechaHoy = req.query.fecha || new Date().toISOString().split('T')[0];
 
-        // Mapa de nombres en español mixto a uppercase (por si viene 'Lunes' en lugar de 'LUNES')
+        // Mapa de nombres en espaÃ±ol mixto a uppercase (por si viene 'Lunes' en lugar de 'LUNES')
         const diaMap = {
             'LUNES': 'LUNES', 'MARTES': 'MARTES', 'MIERCOLES': 'MIERCOLES',
-            'MIÉRCOLES': 'MIERCOLES', 'JUEVES': 'JUEVES', 'VIERNES': 'VIERNES',
-            'SABADO': 'SABADO', 'SÁBADO': 'SABADO', 'DOMINGO': 'DOMINGO'
+            'MIÃ‰RCOLES': 'MIERCOLES', 'JUEVES': 'JUEVES', 'VIERNES': 'VIERNES',
+            'SABADO': 'SABADO', 'SÃBADO': 'SABADO', 'DOMINGO': 'DOMINGO'
         };
         const dia = diaParam ? (diaMap[diaParam] || diaParam) : null;
 
@@ -4842,7 +4846,7 @@ app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => 
 });
 
 // GET /api/profesor/mis-deportes
-// Devuelve los deportes únicos (sin repetir) asignados al profesor
+// Devuelve los deportes Ãºnicos (sin repetir) asignados al profesor
 app.get('/api/profesor/mis-deportes', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -4866,7 +4870,7 @@ app.get('/api/profesor/mis-deportes', verificarAutenticacion, async (req, res) =
 });
 
 // GET /api/profesor/categorias-deporte/:deporteId
-// Devuelve las categorías del profesor para un deporte específico
+// Devuelve las categorÃ­as del profesor para un deporte especÃ­fico
 app.get('/api/profesor/categorias-deporte/:deporteId', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -4882,12 +4886,12 @@ app.get('/api/profesor/categorias-deporte/:deporteId', verificarAutenticacion, a
         res.json({ success: true, categorias: rows });
     } catch (error) {
         console.error('Error en /api/profesor/categorias-deporte:', error);
-        res.status(500).json({ success: false, error: 'Error al obtener categorías', categorias: [] });
+        res.status(500).json({ success: false, error: 'Error al obtener categorÃ­as', categorias: [] });
     }
 });
 
 // GET /api/profesor/dias-categoria?deporte_id=X&categoria=Y
-// Devuelve los días disponibles para una categoría
+// Devuelve los dÃ­as disponibles para una categorÃ­a
 app.get('/api/profesor/dias-categoria', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -4904,12 +4908,12 @@ app.get('/api/profesor/dias-categoria', verificarAutenticacion, async (req, res)
         res.json({ success: true, dias: rows.map(r => r.dia) });
     } catch (error) {
         console.error('Error en /api/profesor/dias-categoria:', error);
-        res.status(500).json({ success: false, error: 'Error al obtener días', dias: [] });
+        res.status(500).json({ success: false, error: 'Error al obtener dÃ­as', dias: [] });
     }
 });
 
 // GET /api/profesor/horarios-categoria?deporte_id=X&categoria=Y&dia=Z
-// Devuelve los horarios del profesor para deporte/categoría/día
+// Devuelve los horarios del profesor para deporte/categorÃ­a/dÃ­a
 app.get('/api/profesor/horarios-categoria', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -4935,12 +4939,12 @@ app.get('/api/profesor/horarios-categoria', verificarAutenticacion, async (req, 
 app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async (req, res) => {
     try {
         const { horarioId } = req.params;
-        // Soportar múltiples horario_ids separados por coma (para clases con varios planes)
+        // Soportar mÃºltiples horario_ids separados por coma (para clases con varios planes)
         const horarioIds = horarioId.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
         if (horarioIds.length === 0) {
-            return res.status(400).json({ success: false, error: 'horarioId inválido' });
+            return res.status(400).json({ success: false, error: 'horarioId invÃ¡lido' });
         }
-        // Usar fecha enviada por el cliente (hora local Perú) si viene, sino UTC
+        // Usar fecha enviada por el cliente (hora local PerÃº) si viene, sino UTC
         const fechaHoy = req.query.fecha || new Date().toISOString().split('T')[0];
 
         // Datos del primer horario (para mostrar info de la clase)
@@ -4988,7 +4992,7 @@ app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async 
 });
 
 // POST /api/profesor/guardar-asistencia
-// Guarda la asistencia de una clase y recalcula ranking automáticamente
+// Guarda la asistencia de una clase y recalcula ranking automÃ¡ticamente
 app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
@@ -4998,7 +5002,7 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
             return res.status(400).json({ success: false, error: 'Datos incompletos' });
         }
 
-        // 1. Guardar asistencias (usar horario_id específico del alumno si viene, sino el general)
+        // 1. Guardar asistencias (usar horario_id especÃ­fico del alumno si viene, sino el general)
         for (const a of asistencias) {
             const hId = a.horario_id || horario_id;
             await db.query(`
@@ -5008,7 +5012,7 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
             `, [a.alumno_id, hId, fecha, a.presente ? 1 : 0, adminId]);
         }
 
-        // 2. Recalcular puntos de asistencia del mes automáticamente
+        // 2. Recalcular puntos de asistencia del mes automÃ¡ticamente
         try {
             const fechaObj = new Date(fecha + 'T12:00:00');
             const mes = fechaObj.getMonth() + 1;
@@ -5045,7 +5049,7 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
             }
         } catch (rankError) {
             // No fallar el request principal si el ranking falla
-            console.error('Error al recalcular ranking automático:', rankError);
+            console.error('Error al recalcular ranking automÃ¡tico:', rankError);
         }
 
         res.json({ success: true, message: `Asistencia guardada para ${asistencias.length} alumnos` });
@@ -5059,10 +5063,10 @@ app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req,
 app.get('/api/profesor/historial-asistencias/:horarioId', verificarAutenticacion, async (req, res) => {
     try {
         const { horarioId } = req.params;
-        // Soportar múltiples horario_ids separados por coma
+        // Soportar mÃºltiples horario_ids separados por coma
         const horarioIds = horarioId.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
         if (horarioIds.length === 0) {
-            return res.status(400).json({ success: false, error: 'horarioId inválido' });
+            return res.status(400).json({ success: false, error: 'horarioId invÃ¡lido' });
         }
         const limite = Math.min(parseInt(req.query.limite) || 20, 60);
 
@@ -5103,13 +5107,13 @@ app.get('/api/profesor/datos-exportar', verificarAutenticacion, async (req, res)
         const { horario_id, mes, anio } = req.query;
 
         if (!horario_id || !mes || !anio) {
-            return res.status(400).json({ success: false, error: 'Faltan parámetros: horario_id, mes, anio' });
+            return res.status(400).json({ success: false, error: 'Faltan parÃ¡metros: horario_id, mes, anio' });
         }
 
-        // Soportar múltiples horario_ids separados por coma
+        // Soportar mÃºltiples horario_ids separados por coma
         const horarioIds = horario_id.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
         if (horarioIds.length === 0) {
-            return res.status(400).json({ success: false, error: 'horario_id inválido' });
+            return res.status(400).json({ success: false, error: 'horario_id invÃ¡lido' });
         }
         const placeholders = horarioIds.map(() => '?').join(',');
 
@@ -5254,19 +5258,19 @@ app.post('/api/profesor/asignar-puntaje', verificarAutenticacion, async (req, re
 });
 
 // GET /api/profesor/ranking?deporte_id=X&categoria=Y
-// Devuelve el ranking de alumnos para el deporte/categoría del profesor
+// Devuelve el ranking de alumnos para el deporte/categorÃ­a del profesor
 app.get('/api/profesor/ranking', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
         const { deporte_id, categoria } = req.query;
 
-        // Verificar que el profesor tiene asignado ese deporte/categoría
+        // Verificar que el profesor tiene asignado ese deporte/categorÃ­a
         const [check] = await db.query(
             'SELECT id FROM profesor_deportes WHERE admin_id = ? AND deporte_id = ? AND (? IS NULL OR categoria = ?)',
             [adminId, deporte_id, categoria || null, categoria || null]
         );
         if (check.length === 0) {
-            return res.status(403).json({ success: false, error: 'No autorizado para este deporte/categoría' });
+            return res.status(403).json({ success: false, error: 'No autorizado para este deporte/categorÃ­a' });
         }
 
         const mes = req.query.mes ? parseInt(req.query.mes) : new Date().getMonth() + 1;
@@ -5323,7 +5327,7 @@ app.get('/api/profesor/ranking/categorias/:deporteId', verificarAutenticacion, a
         res.json({ success: true, categorias: rows.map(r => r.categoria) });
     } catch (error) {
         console.error('Error en /api/profesor/ranking/categorias:', error);
-        res.status(500).json({ success: false, error: 'Error al obtener categorías', categorias: [] });
+        res.status(500).json({ success: false, error: 'Error al obtener categorÃ­as', categorias: [] });
     }
 });
 
@@ -5422,7 +5426,7 @@ app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req,
             return res.status(400).json({ success: false, error: 'Faltan fechas' });
         }
 
-        // Condición de deporte
+        // CondiciÃ³n de deporte
         const deporteCondicion = deporte_id ? 'AND h.deporte_id = ?' : '';
         const deporteParams = deporte_id ? [deporte_id] : [];
 
@@ -5504,14 +5508,14 @@ app.get('/api/health', async (req, res) => {
       mysql: null
     };
 
-    // Verificar conexión MySQL
+    // Verificar conexiÃ³n MySQL
     if (db) {
       try {
         const [rows] = await db.query('SELECT 1 as health');
         if (rows[0].health === 1) {
           healthInfo.database = 'connected'; // Actualizar estado
           
-          // Obtener estadísticas básicas
+          // Obtener estadÃ­sticas bÃ¡sicas
           const [alumnos] = await db.query('SELECT COUNT(*) as total FROM alumnos');
           const [inscripciones] = await db.query('SELECT COUNT(*) as total FROM inscripciones');
           const [horarios] = await db.query('SELECT COUNT(*) as total FROM horarios WHERE estado = ?', ['activo']);
@@ -5548,24 +5552,24 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ==================== ENDPOINTS LEGACY (CAMPAMENTO) - DESHABILITADOS ====================
-// Estos endpoints están OBSOLETOS y han sido reemplazados por los endpoints principales
-// que usan MySQL + Apps Script. NO HABILITAR - causarán conflictos
+// Estos endpoints estÃ¡n OBSOLETOS y han sido reemplazados por los endpoints principales
+// que usan MySQL + Apps Script. NO HABILITAR - causarÃ¡n conflictos
 
 /*
-// NOTA: Autenticación con Google Sheets deshabilitada - Se usa Apps Script como intermediario
+// NOTA: AutenticaciÃ³n con Google Sheets deshabilitada - Se usa Apps Script como intermediario
 // Configurar Google Sheets API con Service Account (LEGACY)
 let auth;
 let sheets;
 
-console.log('ℹ️ Backend configurado para usar Apps Script - Google Sheets API no requerida');
+console.log('â„¹ï¸ Backend configurado para usar Apps Script - Google Sheets API no requerida');
 
-// Obtener spreadsheetId del archivo .env o configuración
+// Obtener spreadsheetId del archivo .env o configuraciÃ³n
 const SPREADSHEET_ID = process.env.VITE_SPREADSHEET_ID || '1hCbcC82oeY4auvQ6TC4FdmWcfr35Cnw-EJcPg8B8MCg';
 const SPREADSHEET_ID_BACKUP = process.env.VITE_SPREADSHEET_ID_BACKUP || '1Xp8VI8CulkMZMiOc1RzopFLrwL6FnTQ5a3_gskMpbcY'; // Sheet de respaldo
 
 // ==================== ENDPOINTS ====================
 
-// 1. Agregar inscripción a la hoja única "Inscripciones"
+// 1. Agregar inscripciÃ³n a la hoja Ãºnica "Inscripciones"
 app.post('/api/inscripciones-LEGACY-DISABLED', async (req, res) => {
   try {
     const data = req.body;
@@ -5584,14 +5588,14 @@ app.post('/api/inscripciones-LEGACY-DISABLED', async (req, res) => {
       data.estadoPago, // "Pendiente" por defecto
       new Date(data.fechaInscripcion).toLocaleString('es-PE', { timeZone: 'America/Lima' }),
       data.fechaConfirmacion || '',
-      '', // Columna N - Día 1 Taller 1
-      '', // Columna O - Día 1 Taller 2
-      '', // Columna P - Día 2 Taller 1
-      '', // Columna Q - Día 2 Taller 2
-      '', // Columna R - Día 3 Taller 1
-      '', // Columna S - Día 3 Taller 2
-      '', // Columna T - Día 4 Taller 1
-      ''  // Columna U - Día 4 Taller 2
+      '', // Columna N - DÃ­a 1 Taller 1
+      '', // Columna O - DÃ­a 1 Taller 2
+      '', // Columna P - DÃ­a 2 Taller 1
+      '', // Columna Q - DÃ­a 2 Taller 2
+      '', // Columna R - DÃ­a 3 Taller 1
+      '', // Columna S - DÃ­a 3 Taller 2
+      '', // Columna T - DÃ­a 4 Taller 1
+      ''  // Columna U - DÃ­a 4 Taller 2
     ]];
 
     // Guardar en sheet principal
@@ -5602,34 +5606,34 @@ app.post('/api/inscripciones-LEGACY-DISABLED', async (req, res) => {
       requestBody: { values }
     });
 
-    // Guardar también en sheet de respaldo si está configurado
+    // Guardar tambiÃ©n en sheet de respaldo si estÃ¡ configurado
     if (SPREADSHEET_ID_BACKUP) {
       try {
-        // Obtener la última fila con datos en el sheet de backup para insertar correctamente
+        // Obtener la Ãºltima fila con datos en el sheet de backup para insertar correctamente
         const backupData = await sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID_BACKUP,
-          range: 'Inscripciones!A:A', // Solo columna A para encontrar la última fila
+          range: 'Inscripciones!A:A', // Solo columna A para encontrar la Ãºltima fila
         });
         
         const backupRows = backupData.data.values || [];
-        const nextRow = backupRows.length + 1; // La siguiente fila después de la última con datos
+        const nextRow = backupRows.length + 1; // La siguiente fila despuÃ©s de la Ãºltima con datos
         
-        // Insertar en la fila específica del backup
+        // Insertar en la fila especÃ­fica del backup
         await sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID_BACKUP,
           range: `Inscripciones!A${nextRow}:U${nextRow}`,
           valueInputOption: 'USER_ENTERED',
           requestBody: { values }
         });
-        console.log(`✅ Inscripción guardada también en sheet de respaldo (fila ${nextRow})`);
+        console.log(`âœ… InscripciÃ³n guardada tambiÃ©n en sheet de respaldo (fila ${nextRow})`);
       } catch (backupError) {
-        console.error('⚠️ Error al guardar en sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al guardar en sheet de respaldo:', backupError.message);
       }
     }
 
-    res.json({ success: true, message: 'Inscripción guardada' });
+    res.json({ success: true, message: 'InscripciÃ³n guardada' });
   } catch (error) {
-    console.error('Error al guardar inscripción:', error);
+    console.error('Error al guardar inscripciÃ³n:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -5647,7 +5651,7 @@ app.get('/api/verificar-dni/:dni', async (req, res) => {
 
     const rows = response.data.values || [];
 
-    // Buscar DNI en columna F (índice 5)
+    // Buscar DNI en columna F (Ã­ndice 5)
     let existe = false;
     
     for (let i = 1; i < rows.length; i++) {
@@ -5677,7 +5681,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
 
     const rows = result.data.values || [];
 
-    // Buscar DNI en columna F (índice 5) Y Estado Pago = "Confirmado" en columna K (índice 10)
+    // Buscar DNI en columna F (Ã­ndice 5) Y Estado Pago = "Confirmado" en columna K (Ã­ndice 10)
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (row[5] === dni && row[10] === 'Confirmado') {
@@ -5704,7 +5708,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
       }
     }
 
-    // Si no encontró en el principal, buscar en el sheet de respaldo
+    // Si no encontrÃ³ en el principal, buscar en el sheet de respaldo
     if (SPREADSHEET_ID_BACKUP) {
       try {
         const resultBackup = await sheets.spreadsheets.values.get({
@@ -5717,7 +5721,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
         for (let i = 1; i < rowsBackup.length; i++) {
           const row = rowsBackup[i];
           if (row[5] === dni && row[10] === 'Confirmado') {
-            console.log('✅ Pago confirmado encontrado en sheet de respaldo');
+            console.log('âœ… Pago confirmado encontrado en sheet de respaldo');
             return res.json({
               permitido: true,
               datos: {
@@ -5741,7 +5745,7 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
           }
         }
       } catch (backupError) {
-        console.error('⚠️ Error al verificar en sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al verificar en sheet de respaldo:', backupError.message);
       }
     }
 
@@ -5767,7 +5771,7 @@ app.get('/api/verificar-taller/:dni', async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (row[5] === dni) {
-        // Verificar columnas N-U (sistema de talleres por día)
+        // Verificar columnas N-U (sistema de talleres por dÃ­a)
         const talleresNuevos = row.slice(13, 21); // columnas N-U
         const tieneTalleresNuevos = talleresNuevos && talleresNuevos.some(t => t && t.trim() !== '');
         
@@ -5779,7 +5783,7 @@ app.get('/api/verificar-taller/:dni', async (req, res) => {
       }
     }
 
-    // Si no encontró en el principal, buscar en el sheet de respaldo
+    // Si no encontrÃ³ en el principal, buscar en el sheet de respaldo
     if (SPREADSHEET_ID_BACKUP) {
       try {
         const resultBackup = await sheets.spreadsheets.values.get({
@@ -5802,7 +5806,7 @@ app.get('/api/verificar-taller/:dni', async (req, res) => {
           }
         }
       } catch (backupError) {
-        console.error('⚠️ Error al verificar talleres en sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al verificar talleres en sheet de respaldo:', backupError.message);
       }
     }
 
@@ -5821,7 +5825,7 @@ app.post('/api/registrar-taller', async (req, res) => {
     // Buscar la fila del usuario
     const result = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Inscripciones!A:U', // Hoja única
+      range: 'Inscripciones!A:U', // Hoja Ãºnica
     });
 
     const rows = result.data.values || [];
@@ -5841,7 +5845,7 @@ app.post('/api/registrar-taller', async (req, res) => {
     // Actualizar columnas N y O
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Inscripciones!N${rowIndex}:O${rowIndex}`, // Hoja única
+      range: `Inscripciones!N${rowIndex}:O${rowIndex}`, // Hoja Ãºnica
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[
@@ -5851,7 +5855,7 @@ app.post('/api/registrar-taller', async (req, res) => {
       }
     });
 
-    // Actualizar también en sheet de respaldo si está configurado
+    // Actualizar tambiÃ©n en sheet de respaldo si estÃ¡ configurado
     if (SPREADSHEET_ID_BACKUP) {
       try {
         // Buscar la fila del usuario en el sheet de respaldo de forma INDEPENDIENTE
@@ -5882,10 +5886,10 @@ app.post('/api/registrar-taller', async (req, res) => {
               ]]
             }
           });
-          console.log(`✅ Taller guardado también en sheet de respaldo (fila ${backupRowIndex})`);
+          console.log(`âœ… Taller guardado tambiÃ©n en sheet de respaldo (fila ${backupRowIndex})`);
         }
       } catch (backupError) {
-        console.error('⚠️ Error al guardar taller en sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al guardar taller en sheet de respaldo:', backupError.message);
       }
     }
 
@@ -5896,14 +5900,14 @@ app.post('/api/registrar-taller', async (req, res) => {
   }
 });
 
-// 5B. Registrar múltiples talleres por día (NUEVO SISTEMA)
+// 5B. Registrar mÃºltiples talleres por dÃ­a (NUEVO SISTEMA)
 app.post('/api/registrar-talleres-por-dia', async (req, res) => {
   try {
     const { dni, talleres } = req.body;
     // talleres es un array de { dia: number, talleres: string[] }
     
     if (!dni || !talleres || !Array.isArray(talleres)) {
-      return res.status(400).json({ success: false, error: 'Datos inválidos' });
+      return res.status(400).json({ success: false, error: 'Datos invÃ¡lidos' });
     }
 
     // Buscar la fila del usuario
@@ -5928,12 +5932,12 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
     }
 
-    // VERIFICAR SI YA TIENE TALLERES REGISTRADOS (columnas N-U, índices 13-20)
+    // VERIFICAR SI YA TIENE TALLERES REGISTRADOS (columnas N-U, Ã­ndices 13-20)
     const talleresExistentes = filaUsuario.slice(13, 21); // columnas N-U
     const tieneAlgunTaller = talleresExistentes.some(t => t && t.trim() !== '');
     
     if (tieneAlgunTaller) {
-      console.log(`⚠️ Usuario ${dni} ya tiene talleres registrados`);
+      console.log(`âš ï¸ Usuario ${dni} ya tiene talleres registrados`);
       return res.status(400).json({ 
         success: false, 
         error: 'Ya tienes talleres registrados. No puedes inscribirte nuevamente.' 
@@ -5949,7 +5953,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
       const talleresDelDia = diaData.talleres;
 
       if (dia >= 1 && dia <= 4 && Array.isArray(talleresDelDia)) {
-        const baseIndex = (dia - 1) * 2; // Cada día tiene 2 columnas
+        const baseIndex = (dia - 1) * 2; // Cada dÃ­a tiene 2 columnas
         
         // Convertir IDs a NOMBRES completos
         if (talleresDelDia[0]) {
@@ -5975,7 +5979,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
 
     // ==================== NUEVA FUNCIONALIDAD: AGREGAR A HOJAS DE TALLERES ====================
     // Obtener datos completos del usuario
-    // Columnas: A=Código, B=Nombres, C=Apellidos, D=Edad, E=Sexo, F=DNI, G=Email, H=Teléfono, I=Iglesia
+    // Columnas: A=CÃ³digo, B=Nombres, C=Apellidos, D=Edad, E=Sexo, F=DNI, G=Email, H=TelÃ©fono, I=Iglesia
     const datosUsuario = {
       codigo: filaUsuario[0],
       nombres: filaUsuario[1],
@@ -5989,7 +5993,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
       fechaRegistro: new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })
     };
 
-    // Función auxiliar para agregar usuario a hoja de taller
+    // FunciÃ³n auxiliar para agregar usuario a hoja de taller
     const agregarAHojaTaller = async (spreadsheetId, nombreTaller, datosUsuario) => {
       try {
         // Verificar si la hoja existe, si no, crearla
@@ -6010,7 +6014,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
           });
           
           // Agregar encabezados
-          const encabezados = [['Código', 'Nombres', 'Apellidos', 'Edad', 'Sexo', 'DNI', 'Email', 'Teléfono', 'Iglesia', 'Fecha Registro']];
+          const encabezados = [['CÃ³digo', 'Nombres', 'Apellidos', 'Edad', 'Sexo', 'DNI', 'Email', 'TelÃ©fono', 'Iglesia', 'Fecha Registro']];
           await sheets.spreadsheets.values.update({
             spreadsheetId,
             range: `${nombreTaller}!A1:J1`,
@@ -6018,7 +6022,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
             requestBody: { values: encabezados }
           });
           
-          console.log(`📄 Hoja creada: ${nombreTaller}`);
+          console.log(`ðŸ“„ Hoja creada: ${nombreTaller}`);
         }
         
         // Agregar los datos del usuario a la hoja del taller
@@ -6042,9 +6046,9 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
           requestBody: { values: fila }
         });
         
-        console.log(`✅ Usuario agregado a hoja: ${nombreTaller}`);
+        console.log(`âœ… Usuario agregado a hoja: ${nombreTaller}`);
       } catch (error) {
-        console.error(`⚠️ Error al agregar usuario a hoja ${nombreTaller}:`, error.message);
+        console.error(`âš ï¸ Error al agregar usuario a hoja ${nombreTaller}:`, error.message);
       }
     };
 
@@ -6056,7 +6060,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
       }
     }
 
-    // Actualizar también en sheet de respaldo si está configurado
+    // Actualizar tambiÃ©n en sheet de respaldo si estÃ¡ configurado
     if (SPREADSHEET_ID_BACKUP) {
       try {
         // Buscar la fila del usuario en el sheet de respaldo de forma INDEPENDIENTE
@@ -6069,7 +6073,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
         let backupRowIndex = -1;
 
         for (let i = 1; i < backupRows.length; i++) {
-          if (backupRows[i][5] === dni) { // Columna F (índice 5) es el DNI
+          if (backupRows[i][5] === dni) { // Columna F (Ã­ndice 5) es el DNI
             backupRowIndex = i + 1;
             break;
           }
@@ -6084,7 +6088,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
               values: [talleresPorColumna]
             }
           });
-          console.log(`✅ Talleres guardados también en sheet de respaldo (fila ${backupRowIndex})`);
+          console.log(`âœ… Talleres guardados tambiÃ©n en sheet de respaldo (fila ${backupRowIndex})`);
           
           // Agregar a hojas de talleres en sheet de respaldo
           for (let i = 0; i < talleresPorColumna.length; i++) {
@@ -6094,17 +6098,17 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
             }
           }
         } else {
-          console.warn(`⚠️ Usuario ${dni} no encontrado en sheet de respaldo`);
+          console.warn(`âš ï¸ Usuario ${dni} no encontrado en sheet de respaldo`);
         }
       } catch (backupError) {
-        console.error('⚠️ Error al guardar talleres en sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al guardar talleres en sheet de respaldo:', backupError.message);
       }
     }
 
-    console.log(`✅ Talleres registrados para DNI ${dni}:`, talleresPorColumna);
+    console.log(`âœ… Talleres registrados para DNI ${dni}:`, talleresPorColumna);
     res.json({ success: true, message: 'Talleres registrados exitosamente' });
   } catch (error) {
-    console.error('Error al registrar talleres por día:', error);
+    console.error('Error al registrar talleres por dÃ­a:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -6112,7 +6116,7 @@ app.post('/api/registrar-talleres-por-dia', async (req, res) => {
 // 5C. Obtener cupos disponibles por taller (NUEVO)
 app.get('/api/cupos-talleres', async (req, res) => {
   try {
-    console.log('📊 Obteniendo cupos de talleres...');
+    console.log('ðŸ“Š Obteniendo cupos de talleres...');
     
     // Obtener todas las inscripciones
     const result = await sheets.spreadsheets.values.get({
@@ -6137,8 +6141,8 @@ app.get('/api/cupos-talleres', async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       
-      // Leer columnas N-U (índices 13-20)
-      // N=Día1-T1, O=Día1-T2, P=Día2-T1, Q=Día2-T2, R=Día3-T1, S=Día3-T2, T=Día4-T1, U=Día4-T2
+      // Leer columnas N-U (Ã­ndices 13-20)
+      // N=DÃ­a1-T1, O=DÃ­a1-T2, P=DÃ­a2-T1, Q=DÃ­a2-T2, R=DÃ­a3-T1, S=DÃ­a3-T2, T=DÃ­a4-T1, U=DÃ­a4-T2
       const talleres = row.slice(13, 21);
       
       talleres.forEach(nombreTaller => {
@@ -6154,7 +6158,7 @@ app.get('/api/cupos-talleres', async (req, res) => {
       });
     }
     
-    console.log('✅ Cupos calculados:', inscritosPorTaller);
+    console.log('âœ… Cupos calculados:', inscritosPorTaller);
     res.json({ success: true, inscritos: inscritosPorTaller });
   } catch (error) {
     console.error('Error al obtener cupos:', error);
@@ -6176,11 +6180,11 @@ app.get('/api/perfil/:dni', async (req, res) => {
     const rows = result.data.values || [];
     let datosUsuario = null;
 
-    // Buscar DNI en columna F (índice 5) del sheet principal
+    // Buscar DNI en columna F (Ã­ndice 5) del sheet principal
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (row[5] === dni) {
-        // Extraer talleres de columnas N-U (índices 13-20)
+        // Extraer talleres de columnas N-U (Ã­ndices 13-20)
         const talleresPorDia = {
           dia1: [row[13] || null, row[14] || null].filter(t => t),
           dia2: [row[15] || null, row[16] || null].filter(t => t),
@@ -6205,12 +6209,12 @@ app.get('/api/perfil/:dni', async (req, res) => {
           talleresPorDia
         };
         
-        console.log('📋 Usuario encontrado en sheet principal, estado:', datosUsuario.estadoPago);
+        console.log('ðŸ“‹ Usuario encontrado en sheet principal, estado:', datosUsuario.estadoPago);
         break;
       }
     }
 
-    // Si no se encontró en el principal, retornar no encontrado
+    // Si no se encontrÃ³ en el principal, retornar no encontrado
     if (!datosUsuario) {
       return res.json({ encontrado: false, datos: null });
     }
@@ -6231,11 +6235,11 @@ app.get('/api/perfil/:dni', async (req, res) => {
             const estadoPagoBackup = row[10];
             const fechaConfirmacionBackup = row[12];
             
-            console.log('🔍 Estado de pago en backup:', estadoPagoBackup);
+            console.log('ðŸ” Estado de pago en backup:', estadoPagoBackup);
             
             // Si el backup tiene el pago confirmado, usar ese estado
             if (estadoPagoBackup === 'Confirmado') {
-              console.log('✅ Actualizando estado de pago desde backup: Confirmado');
+              console.log('âœ… Actualizando estado de pago desde backup: Confirmado');
               datosUsuario.estadoPago = 'Confirmado';
               datosUsuario.fechaConfirmacion = fechaConfirmacionBackup || datosUsuario.fechaConfirmacion;
             }
@@ -6244,11 +6248,11 @@ app.get('/api/perfil/:dni', async (req, res) => {
           }
         }
       } catch (backupError) {
-        console.error('⚠️ Error al consultar sheet de respaldo:', backupError.message);
+        console.error('âš ï¸ Error al consultar sheet de respaldo:', backupError.message);
       }
     }
 
-    // Retornar datos con el estado de pago correcto (del backup si está confirmado ahí)
+    // Retornar datos con el estado de pago correcto (del backup si estÃ¡ confirmado ahÃ­)
     return res.json({
       encontrado: true,
       datos: datosUsuario
@@ -6262,7 +6266,7 @@ app.get('/api/perfil/:dni', async (req, res) => {
 // 7. Sincronizar talleres - Crear/actualizar hojas por taller
 app.post('/api/sincronizar-talleres', async (req, res) => {
   try {
-    console.log('📊 Sincronizando talleres...');
+    console.log('ðŸ“Š Sincronizando talleres...');
 
     // Obtener todas las inscripciones con talleres asignados
     const response = await sheets.spreadsheets.values.get({
@@ -6307,10 +6311,10 @@ app.post('/api/sincronizar-talleres', async (req, res) => {
 
     // Nombres de talleres
     const nombresTalleres = {
-      'taller-1': 'Taller - Adoración y Alabanza',
+      'taller-1': 'Taller - AdoraciÃ³n y Alabanza',
       'taller-2': 'Taller - Evangelismo Creativo',
       'taller-3': 'Taller - Liderazgo Juvenil',
-      'taller-4': 'Taller - Multimedia y Diseño',
+      'taller-4': 'Taller - Multimedia y DiseÃ±o',
       'taller-5': 'Taller - Teatro y Drama',
       'taller-6': 'Taller - Servicio y Misiones'
     };
@@ -6333,11 +6337,11 @@ app.post('/api/sincronizar-talleres', async (req, res) => {
             }]
           }
         });
-        console.log(`✅ Hoja creada: ${nombreHoja}`);
+        console.log(`âœ… Hoja creada: ${nombreHoja}`);
       }
 
       // Preparar datos para la hoja
-      const encabezados = ['Código', 'Nombres', 'Apellidos', 'Edad', 'DNI', 'Email', 'Teléfono', 'Iglesia', 'Fecha Registro'];
+      const encabezados = ['CÃ³digo', 'Nombres', 'Apellidos', 'Edad', 'DNI', 'Email', 'TelÃ©fono', 'Iglesia', 'Fecha Registro'];
       const filas = participantes.map(p => [
         p.codigo,
         p.nombres,
@@ -6365,7 +6369,7 @@ app.post('/api/sincronizar-talleres', async (req, res) => {
         }
       });
 
-      console.log(`✅ ${nombreHoja}: ${participantes.length} participantes`);
+      console.log(`âœ… ${nombreHoja}: ${participantes.length} participantes`);
     }
 
     res.json({ 
@@ -6382,11 +6386,11 @@ app.post('/api/sincronizar-talleres', async (req, res) => {
 
 FIN BLOQUE LEGACY COMENTADO */
 
-console.log('⚠️  Endpoints legacy deshabilitados - usando solo MySQL + Apps Script');
+console.log('âš ï¸  Endpoints legacy deshabilitados - usando solo MySQL + Apps Script');
 
-// ==================== ENDPOINTS ADMINISTRATIVOS CACHÉ ====================
+// ==================== ENDPOINTS ADMINISTRATIVOS CACHÃ‰ ====================
 
-// Ver estadísticas del caché
+// Ver estadÃ­sticas del cachÃ©
 app.get('/api/cache/stats', (req, res) => {
   const stats = getCacheStats();
   res.json({
@@ -6395,13 +6399,13 @@ app.get('/api/cache/stats', (req, res) => {
   });
 });
 
-// Limpiar todo el caché
+// Limpiar todo el cachÃ©
 app.post('/api/cache/clear', (req, res) => {
   cache.flushAll();
-  console.log('🗑️ TODO EL CACHÉ HA SIDO LIMPIADO');
+  console.log('ðŸ—‘ï¸ TODO EL CACHÃ‰ HA SIDO LIMPIADO');
   res.json({
     success: true,
-    message: 'Caché limpiado correctamente'
+    message: 'CachÃ© limpiado correctamente'
   });
 });
 
@@ -6426,7 +6430,7 @@ app.get('/api/admin/reparar-cupos', async (req, res) => {
   }
 });
 
-// Obtener deportes con sus categorías para reubicaciones
+// Obtener deportes con sus categorÃ­as para reubicaciones
 app.get('/api/admin/reubicaciones/deportes', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const [deportes] = await db.query(`
@@ -6440,7 +6444,7 @@ app.get('/api/admin/reubicaciones/deportes', verificarAutenticacion, verificarAd
       ORDER BY d.nombre
     `);
 
-    // Para cada deporte, obtener sus categorías únicas
+    // Para cada deporte, obtener sus categorÃ­as Ãºnicas
     const deportesConCategorias = await Promise.all(deportes.map(async (deporte) => {
       const [categorias] = await db.query(`
         SELECT DISTINCT categoria 
@@ -6465,7 +6469,7 @@ app.get('/api/admin/reubicaciones/deportes', verificarAutenticacion, verificarAd
   }
 });
 
-// Obtener alumnos agrupados por categoría para un deporte
+// Obtener alumnos agrupados por categorÃ­a para un deporte
 app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { deporteId } = req.params;
@@ -6479,7 +6483,7 @@ app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, v
     const nombreDeporte = deporteInfo[0].nombre;
     const icono = deporteInfo[0].icono;
 
-    // 1. Obtener TODAS las categorías únicas de horarios de este deporte
+    // 1. Obtener TODAS las categorÃ­as Ãºnicas de horarios de este deporte
     const [categoriasHorarios] = await db.query(`
       SELECT DISTINCT categoria, precio
       FROM horarios 
@@ -6512,10 +6516,10 @@ app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, v
       ORDER BY h.categoria, a.apellido_paterno, a.apellido_materno, a.nombres
     `, [deporteId, deporteId]);
 
-    // 3. Crear mapa de categorías con sus alumnos
+    // 3. Crear mapa de categorÃ­as con sus alumnos
     const categoriasMap = {};
     
-    // Inicializar todas las categorías de horarios (incluso las vacías)
+    // Inicializar todas las categorÃ­as de horarios (incluso las vacÃ­as)
     categoriasHorarios.forEach(cat => {
       categoriasMap[cat.categoria] = {
         alumnos: [],
@@ -6523,10 +6527,10 @@ app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, v
       };
     });
 
-    // Agregar categoría para alumnos sin horario asignado
+    // Agregar categorÃ­a para alumnos sin horario asignado
     categoriasMap['Sin asignar'] = { alumnos: [], precio: 0 };
 
-    // Asignar alumnos a sus categorías
+    // Asignar alumnos a sus categorÃ­as
     alumnos.forEach(al => {
       const categoria = al.categoria || 'Sin asignar';
       if (!categoriasMap[categoria]) {
@@ -6545,7 +6549,7 @@ app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, v
       });
     });
 
-    // Convertir a array, filtrando la categoría "Sin asignar" si está vacía
+    // Convertir a array, filtrando la categorÃ­a "Sin asignar" si estÃ¡ vacÃ­a
     const categoriasConAlumnos = Object.entries(categoriasMap)
       .filter(([cat, data]) => cat !== 'Sin asignar' || data.alumnos.length > 0)
       .map(([cat, data]) => ({
@@ -6566,12 +6570,12 @@ app.get('/api/admin/reubicaciones/alumnos/:deporteId', verificarAutenticacion, v
   }
 });
 
-// Preview de reubicación - muestra qué cambiaría
+// Preview de reubicaciÃ³n - muestra quÃ© cambiarÃ­a
 app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { inscripcionId, categoriaDestino, deporteId } = req.query;
 
-    // Obtener info actual de la inscripción con o sin horario
+    // Obtener info actual de la inscripciÃ³n con o sin horario
     const [inscripcionActual] = await db.query(`
       SELECT 
         i.inscripcion_id,
@@ -6592,14 +6596,14 @@ app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdm
     `, [inscripcionId, deporteId]);
 
     if (inscripcionActual.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
 
     const actual = inscripcionActual[0];
     const categoriaActual = actual.categoria_actual || 'Sin asignar';
     const precioActual = parseFloat(actual.precio_inscripcion) || 0;
 
-    // Obtener horarios disponibles en la categoría destino
+    // Obtener horarios disponibles en la categorÃ­a destino
     const [horariosDestino] = await db.query(`
       SELECT horario_id, dia, hora_inicio, hora_fin, precio
       FROM horarios
@@ -6609,13 +6613,13 @@ app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdm
       ORDER BY FIELD(dia, 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO')
     `, [deporteId, categoriaDestino]);
 
-    // Obtener precio de la categoría destino
+    // Obtener precio de la categorÃ­a destino
     const precioNuevo = horariosDestino.length > 0 ? parseFloat(horariosDestino[0].precio) || 0 : 0;
 
-    // Construir días actuales
+    // Construir dÃ­as actuales
     let diasActuales = ['Sin horario asignado'];
     if (actual.dia && actual.hora_inicio) {
-      // Si hay más horarios actuales, obtenerlos
+      // Si hay mÃ¡s horarios actuales, obtenerlos
       const [todosHorariosActuales] = await db.query(`
         SELECT h.dia, h.hora_inicio, h.hora_fin 
         FROM inscripcion_horarios ih
@@ -6627,7 +6631,7 @@ app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdm
       diasActuales = todosHorariosActuales.map(h => `${h.dia} ${h.hora_inicio} - ${h.hora_fin}`);
     }
 
-    // La nueva categoría asigna TODOS sus horarios activos al alumno
+    // La nueva categorÃ­a asigna TODOS sus horarios activos al alumno
     const diasNuevos = horariosDestino.length > 0 
       ? horariosDestino.map(h => `${h.dia} ${h.hora_inicio} - ${h.hora_fin}`)
       : ['No hay horarios disponibles'];
@@ -6649,7 +6653,7 @@ app.get('/api/admin/reubicaciones/preview', verificarAutenticacion, verificarAdm
   }
 });
 
-// Ejecutar reubicación
+// Ejecutar reubicaciÃ³n
 app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const connection = await db.getConnection();
   
@@ -6665,17 +6669,17 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       return res.status(404).json({ success: false, error: 'Deporte no encontrado' });
     }
 
-    // Verificar que la inscripción existe
+    // Verificar que la inscripciÃ³n existe
     const [inscripcionVerify] = await connection.query(
       'SELECT inscripcion_id, precio_mensual FROM inscripciones WHERE inscripcion_id = ? AND deporte_id = ?',
       [inscripcionId, deporteId]
     );
     if (inscripcionVerify.length === 0) {
       await connection.rollback();
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
 
-    // Obtener TODOS los días actuales del alumno en esta inscripción
+    // Obtener TODOS los dÃ­as actuales del alumno en esta inscripciÃ³n
     const [horariosActualesInfo] = await connection.query(`
       SELECT ih.horario_id, h.dia 
       FROM inscripcion_horarios ih
@@ -6686,7 +6690,7 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
 
     const diasActualesMover = horariosActualesInfo.map(h => h.dia);
 
-    // Obtener TODOS los horarios activos de la categoría destino
+    // Obtener TODOS los horarios activos de la categorÃ­a destino
     const [todosHorariosDestino] = await connection.query(`
       SELECT horario_id, cupo_maximo, cupos_ocupados, (cupo_maximo - cupos_ocupados) as cupo_disponible, precio, dia, hora_inicio
       FROM horarios
@@ -6700,24 +6704,24 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       await connection.rollback();
       return res.status(400).json({ 
         success: false, 
-        error: `No hay horarios disponibles en la categoría ${categoriaDestino}` 
+        error: `No hay horarios disponibles en la categorÃ­a ${categoriaDestino}` 
       });
     }
 
-    // Asignar TODOS los horarios de la categoría destino (independientemente de los días actuales)
+    // Asignar TODOS los horarios de la categorÃ­a destino (independientemente de los dÃ­as actuales)
     const horariosAsignados = todosHorariosDestino.filter(h => h.cupo_disponible > 0);
 
     if (horariosAsignados.length === 0) {
       await connection.rollback();
       return res.status(400).json({ 
         success: false, 
-        error: `No hay cupos disponibles en la categoría ${categoriaDestino}` 
+        error: `No hay cupos disponibles en la categorÃ­a ${categoriaDestino}` 
       });
     }
 
     const nuevoPrecio = horariosAsignados[0].precio;
 
-    // Obtener TODOS los horarios actuales de esta inscripción para este deporte
+    // Obtener TODOS los horarios actuales de esta inscripciÃ³n para este deporte
     const [todosHorariosActuales] = await connection.query(`
       SELECT ih.horario_id 
       FROM inscripcion_horarios ih
@@ -6726,9 +6730,9 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
     `, [inscripcionId, deporteId]);
 
     // Liberar cupos de TODOS los horarios anteriores
-    // (El TRIGGER after_inscripcion_horario_delete liberará los cupos automáticamente)
+    // (El TRIGGER after_inscripcion_horario_delete liberarÃ¡ los cupos automÃ¡ticamente)
 
-    // Eliminar TODOS los horarios anteriores de esta inscripción para este deporte
+    // Eliminar TODOS los horarios anteriores de esta inscripciÃ³n para este deporte
     if (todosHorariosActuales.length > 0) {
       const horarioIds = todosHorariosActuales.map(h => h.horario_id);
       await connection.query(
@@ -6738,7 +6742,7 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
     }
 
     // Insertar TODOS los nuevos horarios asignados
-    // (El TRIGGER after_inscripcion_horario_insert ocupará los cupos automáticamente)
+    // (El TRIGGER after_inscripcion_horario_insert ocuparÃ¡ los cupos automÃ¡ticamente)
     for (const horario of horariosAsignados) {
       await connection.query(
         'INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
@@ -6746,7 +6750,7 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
       );
     }
 
-    // Actualizar el precio de la inscripción
+    // Actualizar el precio de la inscripciÃ³n
     if (nuevoPrecio) {
       await connection.query(
         'UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?',
@@ -6756,7 +6760,7 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
 
     await connection.commit();
 
-    // Limpiar caché relacionado
+    // Limpiar cachÃ© relacionado
     cache.del('horarios_disponibles');
 
     res.json({
@@ -6772,9 +6776,9 @@ app.put('/api/admin/reubicaciones/mover', verificarAutenticacion, verificarAdmin
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// MÓDULO: Editor de Landing Page
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// MÃ“DULO: Editor de Landing Page
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LANDING_CONTENT_PATH = path.join(__dirname, 'landing-content.json');
 
 // Biblioteca de medios persistente del CMS. En Docker se monta un volumen en esta ruta.
@@ -6838,7 +6842,7 @@ const imageUpload = multer({
 // POST /api/admin/upload-image
 app.post('/api/admin/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibiÃ³ ninguna imagen' });
     const media = await registrarMedio(req);
     console.log(`[LandingEditor] Imagen #${media.id} subida: ${media.url}`);
     res.status(201).json({ success: true, mediaId: media.id, url: media.url });
@@ -6881,11 +6885,11 @@ const carnetStorage = multer.diskStorage({
 
 const carnetUpload = multer({
   storage: carnetStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB máx
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB mÃ¡x
   fileFilter: (_req, file, cb) => {
     const valid = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
     if (!valid) {
-      return cb(new Error('Formato no permitido. Solo se aceptan imágenes JPG, PNG o WebP.'));
+      return cb(new Error('Formato no permitido. Solo se aceptan imÃ¡genes JPG, PNG o WebP.'));
     }
     cb(null, true);
   }
@@ -6896,7 +6900,7 @@ app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verifica
   try {
     const { dni } = req.params;
     if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+      return res.status(400).json({ success: false, error: 'No se recibiÃ³ ninguna imagen' });
     }
 
     const [alumnos] = await db.query(
@@ -6912,17 +6916,17 @@ app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verifica
     const alumno = alumnos[0];
     const fotoAnterior = alumno.foto_carnet_url;
 
-    // Si la foto anterior era un archivo local en /uploads/carnets/, borrar el archivo físico antiguo para no acumular espacio
+    // Si la foto anterior era un archivo local en /uploads/carnets/, borrar el archivo fÃ­sico antiguo para no acumular espacio
     if (fotoAnterior && fotoAnterior.includes('/uploads/carnets/')) {
       try {
         const nombreArchivoAntiguo = path.basename(fotoAnterior.split('?')[0]);
         const rutaAntigua = path.join(CARNETS_UPLOADS_DIR, nombreArchivoAntiguo);
         if (fs.existsSync(rutaAntigua) && rutaAntigua !== req.file.path) {
           fs.unlinkSync(rutaAntigua);
-          console.log('🗑️ Foto carnet anterior eliminada del disco:', nombreArchivoAntiguo);
+          console.log('ðŸ—‘ï¸ Foto carnet anterior eliminada del disco:', nombreArchivoAntiguo);
         }
       } catch (errDel) {
-        console.warn('⚠️ No se pudo eliminar la foto carnet anterior del disco:', errDel.message);
+        console.warn('âš ï¸ No se pudo eliminar la foto carnet anterior del disco:', errDel.message);
       }
     }
 
@@ -6933,7 +6937,7 @@ app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verifica
       [nuevaFotoUrl, alumno.alumno_id]
     );
 
-    // Invalidar cachés en memoria
+    // Invalidar cachÃ©s en memoria
     try {
       cache.flushAll();
     } catch (_) {}
@@ -6945,23 +6949,23 @@ app.post('/api/admin/alumnos/:dni/foto-carnet', verificarAutenticacion, verifica
         `INSERT INTO logs_actividad (tipo, descripcion, usuario_id, datos)
          VALUES ('actualizar_foto_carnet', ?, ?, ?)`,
         [
-          `Actualización de foto tamaño carnet para DNI ${dni} (${alumno.nombres})`,
+          `ActualizaciÃ³n de foto tamaÃ±o carnet para DNI ${dni} (${alumno.nombres})`,
           adminId,
           JSON.stringify({ dni, alumno_id: alumno.alumno_id, foto_url: nuevaFotoUrl })
         ]
       );
     } catch (_) {}
 
-    console.log(`✅ Foto tamaño carnet actualizada para alumno DNI ${dni}: ${nuevaFotoUrl}`);
+    console.log(`âœ… Foto tamaÃ±o carnet actualizada para alumno DNI ${dni}: ${nuevaFotoUrl}`);
 
     return res.json({
       success: true,
-      mensaje: 'Foto tamaño carnet actualizada correctamente',
+      mensaje: 'Foto tamaÃ±o carnet actualizada correctamente',
       foto_carnet_url: nuevaFotoUrl,
       alumno_id: alumno.alumno_id
     });
   } catch (error) {
-    console.error('Error al actualizar foto tamaño carnet:', error);
+    console.error('Error al actualizar foto tamaÃ±o carnet:', error);
     if (req.file?.path) {
       try { fs.unlinkSync(req.file.path); } catch (_) {}
     }
@@ -6979,11 +6983,11 @@ function leerLandingContent() {
   }
 }
 
-// GET /api/admin/landing-content  — lectura pública (usada por Home si quiere)
+// GET /api/admin/landing-content  â€” lectura pÃºblica (usada por Home si quiere)
 app.get('/api/admin/landing-content', async (req, res) => {
   try {
     const content = leerLandingContent();
-    console.log('[GET /api/admin/landing-content] Contenido leído:', {
+    console.log('[GET /api/admin/landing-content] Contenido leÃ­do:', {
       success: !!content,
       tienePageos: !!content?.pagos,
       paginosKeys: content?.pagos ? Object.keys(content.pagos) : [],
@@ -7003,12 +7007,12 @@ app.get('/api/admin/landing-content', async (req, res) => {
   }
 });
 
-// PUT /api/admin/landing-content  — escritura protegida (solo admins)
+// PUT /api/admin/landing-content  â€” escritura protegida (solo admins)
 app.put('/api/admin/landing-content', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const validation = validateLandingContent(req.body);
     if (!validation.valid) {
-      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
+      return res.status(400).json({ success: false, error: 'Contenido invÃ¡lido', details: validation.errors });
     }
     const nuevoContenido = normalizeLandingContent(req.body);
 
@@ -7029,7 +7033,7 @@ app.put('/api/admin/landing-content', verificarAutenticacion, verificarAdmin, as
   }
 });
 
-// POST /api/admin/landing-content/reset — restaurar valores por defecto
+// POST /api/admin/landing-content/reset â€” restaurar valores por defecto
 app.post('/api/admin/landing-content/reset', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const DEFAULT_PATH = path.join(__dirname, 'landing-content.json');
@@ -7046,7 +7050,7 @@ app.post('/api/admin/landing-content/reset', verificarAutenticacion, verificarAd
 });
 
 // ==============================================================
-// MÓDULO 3 — Landing content con persistencia en MySQL
+// MÃ“DULO 3 â€” Landing content con persistencia en MySQL
 // ==============================================================
 
 // --- Helpers ---
@@ -7062,7 +7066,7 @@ function contentToRows(content) {
   const pushText  = (slug, idx, clave, valor) => texts.push({ section_slug: slug, item_index: idx, clave, valor: valor != null ? String(valor) : '' });
   const pushImage = (slug, idx, clave, url)   => images.push({ section_slug: slug, item_index: idx, clave, url: url || '' });
 
-  // hero — fields: title, subtitle, description, image, sport, accent
+  // hero â€” fields: title, subtitle, description, image, sport, accent
   const slides = content?.hero?.slides || [];
   slides.forEach((s, i) => {
     pushText('hero', i, 'title',       s.title);
@@ -7073,7 +7077,7 @@ function contentToRows(content) {
     if (s.image) pushImage('hero', i, 'image', s.image);
   });
 
-  // deportes — fields: titulo, descripcion, imagen, categoria, fecha, destacado
+  // deportes â€” fields: titulo, descripcion, imagen, categoria, fecha, destacado
   const deportes = content?.deportes || [];
   deportes.forEach((d, i) => {
     pushText('deportes', i, 'titulo',      d.titulo);
@@ -7084,14 +7088,14 @@ function contentToRows(content) {
     if (d.imagen) pushImage('deportes', i, 'imagen', d.imagen);
   });
 
-  // estadisticas — flat object: gente, partidos, anos, trofeos
+  // estadisticas â€” flat object: gente, partidos, anos, trofeos
   const est = content?.estadisticas || {};
   pushText('estadisticas', 0, 'gente',    est.gente);
   pushText('estadisticas', 0, 'partidos', est.partidos);
   pushText('estadisticas', 0, 'anos',     est.anos);
   pushText('estadisticas', 0, 'trofeos',  est.trofeos);
 
-  // docentes — fields: nombre, especialidad, foto
+  // docentes â€” fields: nombre, especialidad, foto
   const docentes = content?.docentes || [];
   docentes.forEach((d, i) => {
     pushText('docentes', i, 'nombre',       d.nombre);
@@ -7099,7 +7103,7 @@ function contentToRows(content) {
     if (d.foto) pushImage('docentes', i, 'foto', d.foto);
   });
 
-  // cta — fields: titulo, subtitulo, botonTexto, botonEnlace + imagen
+  // cta â€” fields: titulo, subtitulo, botonTexto, botonEnlace + imagen
   const cta = content?.cta || {};
   pushText('cta', 0, 'titulo',      cta.titulo);
   pushText('cta', 0, 'subtitulo',   cta.subtitulo);
@@ -7107,20 +7111,20 @@ function contentToRows(content) {
   pushText('cta', 0, 'botonEnlace', cta.botonEnlace);
   if (cta.imagen) pushImage('cta', 0, 'imagen', cta.imagen);
 
-  // general — fields: nombreClub, copyright, facebook, whatsapp
+  // general â€” fields: nombreClub, copyright, facebook, whatsapp
   const gen = content?.general || {};
   pushText('general', 0, 'nombreClub', gen.nombreClub);
   pushText('general', 0, 'copyright',  gen.copyright);
   pushText('general', 0, 'facebook',   gen.facebook);
   pushText('general', 0, 'whatsapp',   gen.whatsapp);
 
-  // tipografia — fields: fuenteTitulos, pesoTitulos, fuenteCuerpo
+  // tipografia â€” fields: fuenteTitulos, pesoTitulos, fuenteCuerpo
   const tip = content?.tipografia || {};
   pushText('tipografia', 0, 'fuenteTitulos', tip.fuenteTitulos);
   pushText('tipografia', 0, 'pesoTitulos',   tip.pesoTitulos);
   pushText('tipografia', 0, 'fuenteCuerpo',  tip.fuenteCuerpo);
 
-  // partidos — array de 4 partidos, cada uno con equipoLocal, equipoVisita, fecha, resultado, liga, season, sede
+  // partidos â€” array de 4 partidos, cada uno con equipoLocal, equipoVisita, fecha, resultado, liga, season, sede
   const partidos = content?.partidos || [];
   partidos.forEach((p, i) => {
     pushText('partidos', i, 'local_nombre',  p.equipoLocal?.nombre);
@@ -7134,7 +7138,7 @@ function contentToRows(content) {
     if (p.equipoVisita?.logo) pushImage('partidos', i, 'visita_logo', p.equipoVisita.logo);
   });
 
-  // novedades — header (subtitulo, titulo) + array de items
+  // novedades â€” header (subtitulo, titulo) + array de items
   const nov = content?.novedades || {};
   pushText('novedades', 0, 'subtitulo', nov.subtitulo);
   pushText('novedades', 0, 'titulo',    nov.titulo);
@@ -7150,7 +7154,7 @@ function contentToRows(content) {
     if (item.imagen) pushImage('novedades_art', i, 'imagen', item.imagen);
   });
 
-  // patrocinadores — array de sponsors con nombre, enlace e imagen opcional
+  // patrocinadores â€” array de sponsors con nombre, enlace e imagen opcional
   const sponsors = content?.patrocinadores || [];
   sponsors.forEach((sp, i) => {
     pushText('patrocinadores', i, 'nombre', sp.nombre);
@@ -7158,7 +7162,7 @@ function contentToRows(content) {
     if (sp.imagen) pushImage('patrocinadores', i, 'logo', sp.imagen);
   });
 
-  // galeria — botonTexto + 6 items con alt e imagen
+  // galeria â€” botonTexto + 6 items con alt e imagen
   const galeria = content?.galeria || {};
   pushText('galeria', 0, 'botonTexto', galeria.botonTexto);
   const galeriaItems = galeria.items || [];
@@ -7212,7 +7216,7 @@ function rowsToContent(textRows, imageRows) {
     imagen:      iIdx[`deportes|${i}|imagen`]      || ''
   }));
 
-  // estadisticas — flat object (no es array)
+  // estadisticas â€” flat object (no es array)
   const estadisticas = {
     gente:    tIdx['estadisticas|0|gente']    || '',
     partidos: tIdx['estadisticas|0|partidos'] || '',
@@ -7268,7 +7272,7 @@ function rowsToContent(textRows, imageRows) {
     },
     novedades: {
       subtitulo: tIdx['novedades|0|subtitulo'] || 'Academia Jaguares',
-      titulo:    tIdx['novedades|0|titulo']    || 'Últimas Novedades',
+      titulo:    tIdx['novedades|0|titulo']    || 'Ãšltimas Novedades',
       items: (() => {
         const max = maxIdx('novedades_art', textRows);
         if (max < 0) return [];
@@ -7297,7 +7301,7 @@ function rowsToContent(textRows, imageRows) {
       }));
     })(),
     galeria: {
-      botonTexto: tIdx['galeria|0|botonTexto'] || 'Síguenos en Facebook',
+      botonTexto: tIdx['galeria|0|botonTexto'] || 'SÃ­guenos en Facebook',
       items: Array.from({ length: 6 }, (_, i) => ({
         imagen: iIdx[`galeria|${i + 1}|imagen`] || '',
         alt:    tIdx[`galeria|${i + 1}|alt`]    || '',
@@ -7307,14 +7311,14 @@ function rowsToContent(textRows, imageRows) {
 }
 
 // GET /api/landing
-// Devuelve el contenido activo de la landing para el público.
-// Prioridad: landing_versions (status=published) → landing_texts/images → JSON fallback
+// Devuelve el contenido activo de la landing para el pÃºblico.
+// Prioridad: landing_versions (status=published) â†’ landing_texts/images â†’ JSON fallback
 app.get('/api/landing', async (req, res) => {
   try {
     // Cache: 30 s browser + stale-while-revalidate 60 s para CDN/proxy
     res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 
-    // Módulo 5: buscar versión publicada en landing_versions
+    // MÃ³dulo 5: buscar versiÃ³n publicada en landing_versions
     const [vRows] = await db.query(
       `SELECT content FROM landing_versions WHERE status = 'published' ORDER BY published_at DESC LIMIT 1`
     );
@@ -7325,7 +7329,7 @@ app.get('/api/landing', async (req, res) => {
       return res.json({ success: true, source: 'versions', data: normalizeLandingContent(content) });
     }
 
-    // Módulo 3 fallback: landing_texts / landing_images
+    // MÃ³dulo 3 fallback: landing_texts / landing_images
     const [textRows]  = await db.query('SELECT section_slug, item_index, clave, valor FROM landing_texts');
     const [imageRows] = await db.query('SELECT section_slug, item_index, clave, url FROM landing_images');
 
@@ -7349,13 +7353,13 @@ app.get('/api/landing', async (req, res) => {
 
 // POST /api/landing/update
 // Guarda el contenido completo en la BD Y en landing-content.json.
-// Requiere autenticación de admin.
+// Requiere autenticaciÃ³n de admin.
 app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const conn = await db.getConnection();
   try {
     const validation = validateLandingContent(req.body);
     if (!validation.valid) {
-      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
+      return res.status(400).json({ success: false, error: 'Contenido invÃ¡lido', details: validation.errors });
     }
     const content = normalizeLandingContent(req.body);
 
@@ -7385,7 +7389,7 @@ app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (r
 
     await conn.commit();
 
-    // También persistir en JSON para backward-compat con endpoints viejos
+    // TambiÃ©n persistir en JSON para backward-compat con endpoints viejos
     const meta = {
       ultimaActualizacion: new Date().toISOString(),
       actualizadoPor: req.usuario?.email || 'admin'
@@ -7393,7 +7397,7 @@ app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (r
     const contentConMeta = { ...content, _meta: meta };
     fs.writeFileSync(LANDING_CONTENT_PATH, JSON.stringify(contentConMeta, null, 2), 'utf-8');
 
-    console.log(`[Landing] Contenido actualizado en BD+JSON por ${meta.actualizadoPor}. Textos: ${texts.length}, Imágenes: ${images.length}`);
+    console.log(`[Landing] Contenido actualizado en BD+JSON por ${meta.actualizadoPor}. Textos: ${texts.length}, ImÃ¡genes: ${images.length}`);
     res.json({ success: true, message: 'Contenido guardado en BD y JSON', meta, stats: { texts: texts.length, images: images.length } });
   } catch (error) {
     await conn.rollback();
@@ -7406,7 +7410,7 @@ app.post('/api/landing/update', verificarAutenticacion, verificarAdmin, async (r
 
 // POST /api/landing/seed
 // Admin only. Lee landing-content.json y lo migra a la BD.
-// Útil para la primera carga o para resetear desde el archivo.
+// Ãštil para la primera carga o para resetear desde el archivo.
 app.post('/api/landing/seed', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const conn = await db.getConnection();
   try {
@@ -7435,7 +7439,7 @@ app.post('/api/landing/seed', verificarAutenticacion, verificarAdmin, async (req
     }
 
     await conn.commit();
-    console.log(`[Landing] Seed completado. Textos: ${texts.length}, Imágenes: ${images.length}`);
+    console.log(`[Landing] Seed completado. Textos: ${texts.length}, ImÃ¡genes: ${images.length}`);
     res.json({ success: true, message: 'Seed completado', stats: { texts: texts.length, images: images.length } });
   } catch (error) {
     await conn.rollback();
@@ -7447,11 +7451,11 @@ app.post('/api/landing/seed', verificarAutenticacion, verificarAdmin, async (req
 });
 
 // POST /api/landing/upload-image
-// Alias del endpoint de subida de imágenes que ya existe.
+// Alias del endpoint de subida de imÃ¡genes que ya existe.
 // Usa el mismo middleware multer (imageUpload).
 app.post('/api/landing/upload-image', verificarAutenticacion, verificarAdmin, imageUpload.single('image'), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibió ninguna imagen' });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No se recibiÃ³ ninguna imagen' });
     const media = await registrarMedio(req);
     console.log(`[Landing] Imagen #${media.id} subida: ${media.url}`);
     res.status(201).json({ success: true, mediaId: media.id, url: media.url, originalName: req.file.originalname });
@@ -7460,7 +7464,7 @@ app.post('/api/landing/upload-image', verificarAutenticacion, verificarAdmin, im
   }
 });
 
-// GET /api/landing/media - biblioteca de imágenes del CMS
+// GET /api/landing/media - biblioteca de imÃ¡genes del CMS
 app.get('/api/landing/media', verificarAutenticacion, verificarAdmin, async (_req, res) => {
   try {
     const [media] = await db.query(
@@ -7470,7 +7474,7 @@ app.get('/api/landing/media', verificarAutenticacion, verificarAdmin, async (_re
     res.json({ success: true, media });
   } catch (error) {
     console.error('[Landing] Error listando medios:', error);
-    res.status(500).json({ success: false, error: 'No se pudo cargar la biblioteca de imágenes.' });
+    res.status(500).json({ success: false, error: 'No se pudo cargar la biblioteca de imÃ¡genes.' });
   }
 });
 
@@ -7479,7 +7483,7 @@ app.delete('/api/landing/media/:id', verificarAutenticacion, verificarAdmin, asy
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ success: false, error: 'Identificador de imagen inválido.' });
+      return res.status(400).json({ success: false, error: 'Identificador de imagen invÃ¡lido.' });
     }
     const [rows] = await db.query('SELECT filename FROM landing_media WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ success: false, error: 'Imagen no encontrada.' });
@@ -7487,7 +7491,7 @@ app.delete('/api/landing/media/:id', verificarAutenticacion, verificarAdmin, asy
     const target = path.resolve(UPLOADS_DIR, rows[0].filename);
     const safePrefix = `${UPLOADS_DIR}${path.sep}`;
     if (!target.startsWith(safePrefix)) {
-      return res.status(400).json({ success: false, error: 'Ruta de imagen inválida.' });
+      return res.status(400).json({ success: false, error: 'Ruta de imagen invÃ¡lida.' });
     }
 
     await db.query('DELETE FROM landing_media WHERE id = ?', [id]);
@@ -7500,12 +7504,12 @@ app.delete('/api/landing/media/:id', verificarAutenticacion, verificarAdmin, asy
 });
 
 // ==============================================================
-// MÓDULO 5 — SISTEMA DE PUBLICACIÓN DE VERSIONES
+// MÃ“DULO 5 â€” SISTEMA DE PUBLICACIÃ“N DE VERSIONES
 // ==============================================================
 
 // GET /api/landing/versions
 // Lista todas las versiones (sin el campo content para no saturar).
-// Requiere autenticación de admin.
+// Requiere autenticaciÃ³n de admin.
 app.get('/api/landing/versions', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -7522,8 +7526,8 @@ app.get('/api/landing/versions', verificarAutenticacion, verificarAdmin, async (
 });
 
 // GET /api/landing/versions/:id
-// Devuelve el contenido completo de una versión específica.
-// Requiere autenticación de admin.
+// Devuelve el contenido completo de una versiÃ³n especÃ­fica.
+// Requiere autenticaciÃ³n de admin.
 app.get('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -7532,29 +7536,29 @@ app.get('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, asy
        FROM landing_versions WHERE id = ?`,
       [id]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'VersiÃ³n no encontrada' });
 
     const version = rows[0];
     if (typeof version.content === 'string') version.content = JSON.parse(version.content);
     res.json({ success: true, version });
   } catch (error) {
     console.error('[Versions] Error GET /api/landing/versions/:id:', error);
-    res.status(500).json({ success: false, error: 'Error al leer versión' });
+    res.status(500).json({ success: false, error: 'Error al leer versiÃ³n' });
   }
 });
 
 // POST /api/landing/draft
 // Guarda el contenido actual como un nuevo borrador.
-// NO modifica la versión publicada ni afecta al público.
-// Requiere autenticación de admin.
+// NO modifica la versiÃ³n publicada ni afecta al pÃºblico.
+// Requiere autenticaciÃ³n de admin.
 app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const validation = validateLandingContent(req.body);
     if (!validation.valid) {
-      return res.status(400).json({ success: false, error: 'Contenido inválido', details: validation.errors });
+      return res.status(400).json({ success: false, error: 'Contenido invÃ¡lido', details: validation.errors });
     }
 
-    // CRÍTICO: preservar pagos del JSON actual si el editor no los envía
+    // CRÃTICO: preservar pagos del JSON actual si el editor no los envÃ­a
     const draftBody = { ...req.body };
     // SIEMPRE inyectar pagos del JSON en el borrador
     {
@@ -7569,7 +7573,7 @@ app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (re
     const autor = req.user?.username || req.admin?.usuario || 'admin';
     const now   = new Date();
     const label  = content._draftLabel
-      || `Borrador · ${now.toLocaleDateString('es-PE')} ${now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`;
+      || `Borrador Â· ${now.toLocaleDateString('es-PE')} ${now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`;
     const notes  = content._draftNotes || null;
 
     // Limpiar metadatos del editor del contenido antes de guardar
@@ -7584,7 +7588,7 @@ app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (re
 
     const draftId = result.insertId;
     console.log(`[Versions] Borrador #${draftId} creado por ${autor}: "${label}"`);
-    res.json({ success: true, draftId, label, message: 'Borrador guardado. La landing pública no ha cambiado.' });
+    res.json({ success: true, draftId, label, message: 'Borrador guardado. La landing pÃºblica no ha cambiado.' });
   } catch (error) {
     console.error('[Versions] Error POST /api/landing/draft:', error);
     res.status(500).json({ success: false, error: 'Error al guardar borrador' });
@@ -7592,62 +7596,62 @@ app.post('/api/landing/draft', verificarAutenticacion, verificarAdmin, async (re
 });
 
 // POST /api/landing/publish/:id
-// Publica una versión específica:
-//   1. Archiva la versión publicada actual (si existe)
-//   2. Marca la versión target como 'published'
+// Publica una versiÃ³n especÃ­fica:
+//   1. Archiva la versiÃ³n publicada actual (si existe)
+//   2. Marca la versiÃ³n target como 'published'
 //   3. Actualiza landing_texts/images para backward compat
 //   4. Actualiza landing-content.json
-// Requiere autenticación de admin.
+// Requiere autenticaciÃ³n de admin.
 app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { id } = req.params;
     const autor   = req.user?.username || req.admin?.usuario || 'admin';
 
-    // 1. Verificar que la versión existe y está en estado válido
+    // 1. Verificar que la versiÃ³n existe y estÃ¡ en estado vÃ¡lido
     const [rows] = await conn.query(
       `SELECT id, label, status, content FROM landing_versions WHERE id = ?`,
       [id]
     );
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+      return res.status(404).json({ success: false, error: 'VersiÃ³n no encontrada' });
     }
     const version = rows[0];
     if (version.status === 'archived') {
-      // Permitir rollback desde archivado — continuar igual
+      // Permitir rollback desde archivado â€” continuar igual
     }
 
     const rawContent = typeof version.content === 'string'
       ? JSON.parse(version.content)
       : version.content;
 
-    // CRÍTICO: preservar pagos del JSON actual si la versión no los incluye
-    // El editor de landing no gestiona pagos, por eso no los envía en el borrador
-    // SIEMPRE inyectar pagos desde el JSON — el CMS nunca gestiona pagos
+    // CRÃTICO: preservar pagos del JSON actual si la versiÃ³n no los incluye
+    // El editor de landing no gestiona pagos, por eso no los envÃ­a en el borrador
+    // SIEMPRE inyectar pagos desde el JSON â€” el CMS nunca gestiona pagos
     // Esto garantiza que publish nunca sobreescriba el numero de plin/yape
     {
       const currentJson = leerLandingContent();
       if (currentJson?.pagos) {
         rawContent.pagos = currentJson.pagos;
-        console.log('[Versions] Pagos preservados desde JSON actual al publicar versión');
+        console.log('[Versions] Pagos preservados desde JSON actual al publicar versiÃ³n');
       }
     }
 
     const validation = validateLandingContent(rawContent);
     if (!validation.valid) {
-      return res.status(400).json({ success: false, error: 'La versión contiene datos inválidos.', details: validation.errors });
+      return res.status(400).json({ success: false, error: 'La versiÃ³n contiene datos invÃ¡lidos.', details: validation.errors });
     }
     const content = normalizeLandingContent(rawContent);
 
     await conn.beginTransaction();
 
-    // 2. Archivar la versión publicada actual
+    // 2. Archivar la versiÃ³n publicada actual
     await conn.query(
       `UPDATE landing_versions SET status = 'archived' WHERE status = 'published' AND id != ?`,
       [id]
     );
 
-    // 3. Publicar la versión target
+    // 3. Publicar la versiÃ³n target
     await conn.query(
       `UPDATE landing_versions SET status = 'published', published_at = NOW(), published_by = ? WHERE id = ?`,
       [autor, id]
@@ -7683,10 +7687,10 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
     };
     fs.writeFileSync(LANDING_CONTENT_PATH, JSON.stringify({ ...content, _meta: meta }, null, 2), 'utf-8');
 
-    console.log(`[Versions] Versión #${id} ("${version.label}") publicada por ${autor}`);
+    console.log(`[Versions] VersiÃ³n #${id} ("${version.label}") publicada por ${autor}`);
     res.json({
       success: true,
-      message: `Versión "${version.label}" publicada exitosamente. La landing pública ya muestra el nuevo contenido.`,
+      message: `VersiÃ³n "${version.label}" publicada exitosamente. La landing pÃºblica ya muestra el nuevo contenido.`,
       publishedId: Number(id),
       label: version.label,
       publishedAt: new Date().toISOString(),
@@ -7695,7 +7699,7 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
   } catch (error) {
     await conn.rollback().catch(() => {});
     console.error('[Versions] Error POST /api/landing/publish/:id:', error);
-    res.status(500).json({ success: false, error: 'Error al publicar versión' });
+    res.status(500).json({ success: false, error: 'Error al publicar versiÃ³n' });
   } finally {
     conn.release();
   }
@@ -7703,7 +7707,7 @@ app.post('/api/landing/publish/:id', verificarAutenticacion, verificarAdmin, asy
 
 // DELETE /api/landing/versions/:id
 // Elimina un borrador. No se pueden eliminar versiones publicadas ni archivadas.
-// Requiere autenticación de admin.
+// Requiere autenticaciÃ³n de admin.
 app.delete('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -7712,32 +7716,32 @@ app.delete('/api/landing/versions/:id', verificarAutenticacion, verificarAdmin, 
       `SELECT id, label, status FROM landing_versions WHERE id = ?`,
       [id]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Versión no encontrada' });
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'VersiÃ³n no encontrada' });
 
     if (rows[0].status === 'published') {
-      return res.status(409).json({ success: false, error: 'No se puede eliminar la versión publicada actualmente.' });
+      return res.status(409).json({ success: false, error: 'No se puede eliminar la versiÃ³n publicada actualmente.' });
     }
 
     await db.query(`DELETE FROM landing_versions WHERE id = ?`, [id]);
-    console.log(`[Versions] Versión #${id} ("${rows[0].label}") eliminada`);
-    res.json({ success: true, message: `Versión "${rows[0].label}" eliminada.` });
+    console.log(`[Versions] VersiÃ³n #${id} ("${rows[0].label}") eliminada`);
+    res.json({ success: true, message: `VersiÃ³n "${rows[0].label}" eliminada.` });
   } catch (error) {
     console.error('[Versions] Error DELETE /api/landing/versions/:id:', error);
-    res.status(500).json({ success: false, error: 'Error al eliminar versión' });
+    res.status(500).json({ success: false, error: 'Error al eliminar versiÃ³n' });
   }
 });
 
 // ==============================================================
-// FIN MÓDULO 5
+// FIN MÃ“DULO 5
 // ==============================================================
 
 // ==============================================================
-// MÓDULO 6 — ORDEN DE SECCIONES (landing_structure)
+// MÃ“DULO 6 â€” ORDEN DE SECCIONES (landing_structure)
 // ==============================================================
 
 // GET /api/landing/structure
-// Público — la landing pública lo consume para ordenar secciones.
-// Si la tabla está vacía devuelve los valores por defecto.
+// PÃºblico â€” la landing pÃºblica lo consume para ordenar secciones.
+// Si la tabla estÃ¡ vacÃ­a devuelve los valores por defecto.
 app.get('/api/landing/structure', async (req, res) => {
   try {
     // Cache: 60 s browser + stale-while-revalidate 120 s (el orden de secciones cambia poco)
@@ -7772,7 +7776,7 @@ app.get('/api/landing/structure', async (req, res) => {
 });
 
 // POST /api/landing/structure
-// Admin only — guarda el nuevo orden de secciones.
+// Admin only â€” guarda el nuevo orden de secciones.
 // Body: { sections: [{section_slug, orden, visible}] }
 app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async (req, res) => {
   const conn = await db.getConnection();
@@ -7787,10 +7791,10 @@ app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async
     for (const section of sections) {
       const order = Number(section.orden);
       if (!allowedSlugs.has(section.section_slug) || seen.has(section.section_slug)) {
-        return res.status(400).json({ success: false, error: `Sección inválida o duplicada: ${section.section_slug || '(vacía)'}` });
+        return res.status(400).json({ success: false, error: `SecciÃ³n invÃ¡lida o duplicada: ${section.section_slug || '(vacÃ­a)'}` });
       }
       if (!Number.isFinite(order) || order < 0 || order > 1000) {
-        return res.status(400).json({ success: false, error: `Orden inválido para ${section.section_slug}.` });
+        return res.status(400).json({ success: false, error: `Orden invÃ¡lido para ${section.section_slug}.` });
       }
       seen.add(section.section_slug);
     }
@@ -7819,11 +7823,11 @@ app.post('/api/landing/structure', verificarAutenticacion, verificarAdmin, async
 });
 
 // ==============================================================
-// FIN MÓDULO 6
+// FIN MÃ“DULO 6
 // ==============================================================
 
 // ==============================================================
-// FIN MÓDULO 3
+// FIN MÃ“DULO 3
 // ==============================================================
 
 // Iniciar servidor
@@ -7902,7 +7906,7 @@ app.post('/api/admin/inscripciones/:inscripcionId/override-horario', verificarAu
       invalidateDNICache(inscripcion.dni);
     }
 
-    console.log(`⚡ OVERRIDE ADMIN: horario ${horario_id} (${horario.dia} ${horario.hora_inicio} - Plan ${horario.plan}, Cat ${horario.categoria}) agregado a inscripcion ${inscripcionId} (${inscripcion.deporte}) del alumno DNI ${inscripcion.dni} - ${inscripcion.nombres}`);
+    console.log(`âš¡ OVERRIDE ADMIN: horario ${horario_id} (${horario.dia} ${horario.hora_inicio} - Plan ${horario.plan}, Cat ${horario.categoria}) agregado a inscripcion ${inscripcionId} (${inscripcion.deporte}) del alumno DNI ${inscripcion.dni} - ${inscripcion.nombres}`);
 
     res.json({
       success: true,
@@ -7919,7 +7923,7 @@ app.post('/api/admin/inscripciones/:inscripcionId/override-horario', verificarAu
     });
 
   } catch (error) {
-    console.error('❌ Error en override-horario admin:', error);
+    console.error('âŒ Error en override-horario admin:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -7984,7 +7988,7 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
         );
         if (restantes[0].total === 0) {
           await db.query(`UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?`, [alumnoId]);
-          console.log(`🔴 Alumno ${alumno.dni} marcado inactivo (sin inscripciones activas tras cancelar inscripcion ${inscripcionId})`);
+          console.log(`ðŸ”´ Alumno ${alumno.dni} marcado inactivo (sin inscripciones activas tras cancelar inscripcion ${inscripcionId})`);
         }
 
         // 3. Recalcular monto total en pagos_mensuales pendientes del mes actual
@@ -8005,18 +8009,18 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
               [nuevoMontoTotal, alumnoId, mesActual]
             );
             if (updPm.affectedRows > 0) {
-              console.log(`💰 pagos_mensuales actualizado a S/.${nuevoMontoTotal} para DNI ${alumno.dni} mes ${mesActual} (inscripcion ${inscripcionId} cancelada)`);
+              console.log(`ðŸ’° pagos_mensuales actualizado a S/.${nuevoMontoTotal} para DNI ${alumno.dni} mes ${mesActual} (inscripcion ${inscripcionId} cancelada)`);
             }
           } else {
-            // Sin inscripciones activas → monto 0, marcar pendiente como cancelado si aplica
+            // Sin inscripciones activas â†’ monto 0, marcar pendiente como cancelado si aplica
             await db.query(
               `UPDATE pagos_mensuales SET monto = 0 WHERE alumno_id = ? AND mes = ? AND estado = 'pendiente'`,
               [alumnoId, mesActual]
             );
-            console.log(`💰 pagos_mensuales puesto a 0 para DNI ${alumno.dni} mes ${mesActual} (sin inscripciones activas)`);
+            console.log(`ðŸ’° pagos_mensuales puesto a 0 para DNI ${alumno.dni} mes ${mesActual} (sin inscripciones activas)`);
           }
         } catch (ePm) {
-          console.error('⚠️ Error al recalcular pagos_mensuales tras cancelar inscripcion:', ePm.message);
+          console.error('âš ï¸ Error al recalcular pagos_mensuales tras cancelar inscripcion:', ePm.message);
         }
       }
 
@@ -8024,16 +8028,16 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
       const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
       cache.del(inscritosKeys);
 
-      console.log(`🗑️ OVERRIDE ADMIN (cancelacion): inscripcion ${inscripcionId} (${alumno.deporte}) cancelada para DNI ${alumno.dni} (ultimo horario eliminado)`);
+      console.log(`ðŸ—‘ï¸ OVERRIDE ADMIN (cancelacion): inscripcion ${inscripcionId} (${alumno.deporte}) cancelada para DNI ${alumno.dni} (ultimo horario eliminado)`);
 
       return res.json({
         success: true,
         inscripcion_cancelada: true,
-        mensaje: `La inscripción de ${alumno.deporte} fue cancelada correctamente (era el único horario)`
+        mensaje: `La inscripciÃ³n de ${alumno.deporte} fue cancelada correctamente (era el Ãºnico horario)`
       });
     }
 
-    // --- Caso normal: quedan más horarios, solo quitar este ---
+    // --- Caso normal: quedan mÃ¡s horarios, solo quitar este ---
     await db.query(`
       DELETE FROM inscripcion_horarios WHERE inscripcion_id = ? AND horario_id = ?
     `, [inscripcionId, horarioId]);
@@ -8044,7 +8048,7 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     if (inscritosKeys.length > 0) cache.del(inscritosKeys);
 
-    console.log(`🗑️ OVERRIDE ADMIN (baja): horario ${horarioId} quitado de inscripcion ${inscripcionId} (${alumno.deporte}) del alumno DNI ${alumno.dni}`);
+    console.log(`ðŸ—‘ï¸ OVERRIDE ADMIN (baja): horario ${horarioId} quitado de inscripcion ${inscripcionId} (${alumno.deporte}) del alumno DNI ${alumno.dni}`);
 
     res.json({
       success: true,
@@ -8053,7 +8057,7 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
     });
 
   } catch (error) {
-    console.error('❌ Error al quitar override-horario admin:', error);
+    console.error('âŒ Error al quitar override-horario admin:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8061,40 +8065,40 @@ app.delete('/api/admin/inscripciones/:inscripcionId/override-horario/:horarioId'
 
 const server = app.listen(PORT, () => {  console.log('');
   console.log('='.repeat(70));
-  console.log('🚀 SERVIDOR BACKEND JAGUARES - MODO PRODUCCIÓN');
+  console.log('ðŸš€ SERVIDOR BACKEND JAGUARES - MODO PRODUCCIÃ“N');
   console.log('='.repeat(70));
   console.log('');
-  console.log(`📍 URL Base:        http://localhost:${PORT}`);
-  console.log(`🗄️  Base de Datos:  MySQL 8.0 (Puerto 3307)`);
-  console.log(`⚡ Caché:           NodeCache activado`);
+  console.log(`ðŸ“ URL Base:        http://localhost:${PORT}`);
+  console.log(`ðŸ—„ï¸  Base de Datos:  MySQL 8.0 (Puerto 3307)`);
+  console.log(`âš¡ CachÃ©:           NodeCache activado`);
   console.log('');
-  console.log('🔒 SEGURIDAD ACTIVADA:');
-  console.log('  ✅ JWT Authentication (8h expiry)');
-  console.log('  ✅ Rate Limiting (100 req/15min general, 10 req/hour inscripciones)');
-  console.log('  ✅ CORS Restricción (localhost + whitelist)');
-  console.log('  ✅ Helmet Security Headers');
-  console.log('  ✅ XSS Sanitization');
-  console.log('  ✅ Bcrypt Password Hashing');
+  console.log('ðŸ”’ SEGURIDAD ACTIVADA:');
+  console.log('  âœ… JWT Authentication (8h expiry)');
+  console.log('  âœ… Rate Limiting (100 req/15min general, 10 req/hour inscripciones)');
+  console.log('  âœ… CORS RestricciÃ³n (localhost + whitelist)');
+  console.log('  âœ… Helmet Security Headers');
+  console.log('  âœ… XSS Sanitization');
+  console.log('  âœ… Bcrypt Password Hashing');
   console.log('');
-  console.log('🏃 ENDPOINTS PÚBLICOS:');
+  console.log('ðŸƒ ENDPOINTS PÃšBLICOS:');
   console.log(`  GET    /api/health                         - Health check`);
   console.log(`  GET    /api/horarios                       - Listado de horarios disponibles`);
-  console.log(`  POST   /api/inscribir-multiple             - Inscripción múltiple (rate limited)`);
+  console.log(`  POST   /api/inscribir-multiple             - InscripciÃ³n mÃºltiple (rate limited)`);
   console.log(`  GET    /api/mis-inscripciones/:dni         - Consultar inscripciones por DNI`);
   console.log(`  GET    /api/validar-dni/:dni               - Validar existencia de DNI`);
   console.log('');
-  console.log('🔐 ENDPOINTS PROTEGIDOS (Requieren JWT):');
-  console.log(`  POST   /api/admin/login                    - Autenticación admin`);
+  console.log('ðŸ” ENDPOINTS PROTEGIDOS (Requieren JWT):');
+  console.log(`  POST   /api/admin/login                    - AutenticaciÃ³n admin`);
   console.log(`  GET    /api/admin/inscritos                - Listado completo de inscritos`);
-  console.log(`  GET    /api/admin/estadisticas-financieras - Estadísticas financieras`);
+  console.log(`  GET    /api/admin/estadisticas-financieras - EstadÃ­sticas financieras`);
   console.log('');
-  console.log('⏳ Esperando peticiones...');
+  console.log('â³ Esperando peticiones...');
   console.log('='.repeat(70));
   console.log('');
 });
 
 // ==========================================
-// PANEL DE ADMINISTRACIÓN
+// PANEL DE ADMINISTRACIÃ“N
 // ==========================================
 
 app.post('/api/admin/actualizar-capacidad', async (req, res) => {
@@ -8104,7 +8108,7 @@ app.post('/api/admin/actualizar-capacidad', async (req, res) => {
     if (!nuevaCapacidad || nuevaCapacidad < 20 || nuevaCapacidad > 200) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Capacidad inválida. Debe estar entre 20 y 200.' 
+        error: 'Capacidad invÃ¡lida. Debe estar entre 20 y 200.' 
       });
     }
 
@@ -8130,7 +8134,7 @@ app.post('/api/admin/actualizar-capacidad', async (req, res) => {
 
     const nuevoCupo = Math.ceil((capacidadNum * 2) / 3);
 
-    console.log(`✅ Capacidad actualizada: ${capacidadNum} personas (${nuevoCupo} cupos por taller)`);
+    console.log(`âœ… Capacidad actualizada: ${capacidadNum} personas (${nuevoCupo} cupos por taller)`);
 
     res.json({ 
       success: true, 
@@ -8139,7 +8143,7 @@ app.post('/api/admin/actualizar-capacidad', async (req, res) => {
       nuevoCupoPorTaller: nuevoCupo
     });
   } catch (error) {
-    console.error('❌ Error al actualizar capacidad:', error);
+    console.error('âŒ Error al actualizar capacidad:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8158,21 +8162,21 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// SISTEMA DE CACHÉ PARA ESTADÍSTICAS
+// SISTEMA DE CACHÃ‰ PARA ESTADÃSTICAS
 // ==========================================
 
 let cacheEstadisticas = null;
 let ultimaActualizacion = null;
 const CACHE_DURACION = 2 * 60 * 1000; // 2 minutos
 
-// 8. Obtener estadísticas completas de talleres (CON CACHÉ)
+// 8. Obtener estadÃ­sticas completas de talleres (CON CACHÃ‰)
 app.get('/api/estadisticas-talleres', async (req, res) => {
   try {
     const ahora = Date.now();
     
-    // Si el caché es válido, devolverlo inmediatamente
+    // Si el cachÃ© es vÃ¡lido, devolverlo inmediatamente
     if (cacheEstadisticas && ultimaActualizacion && (ahora - ultimaActualizacion < CACHE_DURACION)) {
-      console.log('📊 Devolviendo estadísticas desde caché');
+      console.log('ðŸ“Š Devolviendo estadÃ­sticas desde cachÃ©');
       return res.json({ 
         success: true, 
         estadisticas: cacheEstadisticas,
@@ -8181,7 +8185,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       });
     }
 
-    console.log('📊 Generando estadísticas frescas...');
+    console.log('ðŸ“Š Generando estadÃ­sticas frescas...');
     
     // Obtener todas las inscripciones
     const result = await sheets.spreadsheets.values.get({
@@ -8224,13 +8228,13 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       'dia1-taller2': 'Amistad, enamoramiento y noviazgo',
       'dia1-taller3': 'Identidad en la era digital',
       'dia2-taller1': 'Finanzas inteligentes',
-      'dia2-taller2': 'Música y contenido',
+      'dia2-taller2': 'MÃºsica y contenido',
       'dia2-taller3': 'Verdad vs relativismo',
-      'dia3-taller1': 'Propósito y vocación',
+      'dia3-taller1': 'PropÃ³sito y vocaciÃ³n',
       'dia3-taller2': 'Misiones',
-      'dia3-taller3': 'Orientación vocacional y elección de carrera',
+      'dia3-taller3': 'OrientaciÃ³n vocacional y elecciÃ³n de carrera',
       'dia4-taller1': 'Impacto comunitario',
-      'dia4-taller2': 'Comunicación y redes sociales',
+      'dia4-taller2': 'ComunicaciÃ³n y redes sociales',
       'dia4-taller3': 'Proyecto de vida recargado'
     };
     
@@ -8244,7 +8248,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       };
     }
     
-    // Analizar datos demográficos y talleres
+    // Analizar datos demogrÃ¡ficos y talleres
     const distribucionGenero = { M: 0, F: 0 };
     const distribucionEdad = { '13-15': 0, '16-18': 0, '19-21': 0, '22-25': 0, '26+': 0 };
     const distribucionIglesia = {};
@@ -8255,7 +8259,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       
-      // Columnas N-U (índices 13-20): talleres seleccionados
+      // Columnas N-U (Ã­ndices 13-20): talleres seleccionados
       const talleres = row.slice(13, 21);
       const tieneTalleres = talleres.some(t => t && t.trim() !== '');
       
@@ -8275,12 +8279,12 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
         }
       });
       
-      // DEMOGRAFÍA - Género (columna E, índice 4)
+      // DEMOGRAFÃA - GÃ©nero (columna E, Ã­ndice 4)
       const sexo = (row[4] || '').toUpperCase().trim();
       if (sexo === 'M') distribucionGenero.M++;
       else if (sexo === 'F') distribucionGenero.F++;
       
-      // Edad (columna D, índice 3)
+      // Edad (columna D, Ã­ndice 3)
       const edad = parseInt(row[3]) || 0;
       if (edad >= 13 && edad <= 15) distribucionEdad['13-15']++;
       else if (edad >= 16 && edad <= 18) distribucionEdad['16-18']++;
@@ -8288,11 +8292,11 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       else if (edad >= 22 && edad <= 25) distribucionEdad['22-25']++;
       else if (edad >= 26) distribucionEdad['26+']++;
       
-      // Iglesia (columna I, índice 8)
+      // Iglesia (columna I, Ã­ndice 8)
       const iglesia = row[8] || 'No especificada';
       distribucionIglesia[iglesia] = (distribucionIglesia[iglesia] || 0) + 1;
       
-      // Estado de pago (columna K, índice 10)
+      // Estado de pago (columna K, Ã­ndice 10)
       const estadoPago = (row[10] || 'Pendiente').trim();
       if (estadoPago === 'Confirmado' || estadoPago === 'Pagado') distribucionPago.Pagado++;
       else distribucionPago.Pendiente++;
@@ -8315,7 +8319,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       }
     }
     
-    // Agrupar por día - TODOS los talleres, incluso con 0 inscritos
+    // Agrupar por dÃ­a - TODOS los talleres, incluso con 0 inscritos
     const talleresAgrupadosPorDia = {
       dia1: {},
       dia2: {},
@@ -8323,7 +8327,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
       dia4: {}
     };
     
-    // Agregar TODOS los talleres a su día correspondiente
+    // Agregar TODOS los talleres a su dÃ­a correspondiente
     for (const [nombre, data] of Object.entries(inscritosPorTaller)) {
       const match = data.id.match(/dia(\d)/);
       if (match) {
@@ -8370,11 +8374,11 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
         .map(([nombre, data]) => ({ nombre, ...data }))
     };
     
-    // Guardar en caché
+    // Guardar en cachÃ©
     cacheEstadisticas = estadisticas;
     ultimaActualizacion = Date.now();
     
-    console.log('✅ Estadísticas generadas y guardadas en caché:');
+    console.log('âœ… EstadÃ­sticas generadas y guardadas en cachÃ©:');
     console.log(`   Total inscritos: ${totalInscritos}`);
     console.log(`   Con talleres: ${personasConTalleres} (${estadisticas.resumen.porcentajeConTalleres}%)`);
     console.log(`   Sin talleres: ${personasSinTalleres}`);
@@ -8382,7 +8386,7 @@ app.get('/api/estadisticas-talleres', async (req, res) => {
     
     res.json({ success: true, estadisticas, fromCache: false });
   } catch (error) {
-    console.error('Error al obtener estadísticas:', error);
+    console.error('Error al obtener estadÃ­sticas:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8401,10 +8405,10 @@ app.get('/api/admin/deportes', async (req, res) => {
       ORDER BY nombre ASC
     `);
     
-    console.log(`✅ Deportes obtenidos: ${deportes.length}`);
+    console.log(`âœ… Deportes obtenidos: ${deportes.length}`);
     res.json({ success: true, deportes });
   } catch (error) {
-    console.error('❌ Error al obtener deportes:', error);
+    console.error('âŒ Error al obtener deportes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8426,13 +8430,13 @@ app.post('/api/admin/deportes', async (req, res) => {
       [nombre, descripcion || null, icono || null, matricula || 20.00]
     );
     
-    // Limpiar caché de horarios
+    // Limpiar cachÃ© de horarios
     cache.flushAll();
     
-    console.log(`✅ Deporte creado: ${nombre} (ID: ${result.insertId})`);
+    console.log(`âœ… Deporte creado: ${nombre} (ID: ${result.insertId})`);
     res.json({ success: true, deporte_id: result.insertId, mensaje: 'Deporte creado correctamente' });
   } catch (error) {
-    console.error('❌ Error al crear deporte:', error);
+    console.error('âŒ Error al crear deporte:', error);
     if (error.code === 'ER_DUP_ENTRY') {
       res.status(400).json({ success: false, error: 'Ya existe un deporte con ese nombre' });
     } else {
@@ -8464,13 +8468,13 @@ app.put('/api/admin/deportes/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Deporte no encontrado' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Deporte actualizado: ID ${deporteId}`);
+    console.log(`âœ… Deporte actualizado: ID ${deporteId}`);
     res.json({ success: true, mensaje: 'Deporte actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error al actualizar deporte:', error);
+    console.error('âŒ Error al actualizar deporte:', error);
     if (error.code === 'ER_DUP_ENTRY') {
       res.status(400).json({ success: false, error: 'Ya existe un deporte con ese nombre' });
     } else {
@@ -8509,13 +8513,13 @@ app.delete('/api/admin/deportes/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Deporte no encontrado' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Deporte desactivado: ID ${deporteId}`);
+    console.log(`âœ… Deporte desactivado: ID ${deporteId}`);
     res.json({ success: true, mensaje: 'Deporte desactivado correctamente' });
   } catch (error) {
-    console.error('❌ Error al eliminar deporte:', error);
+    console.error('âŒ Error al eliminar deporte:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8527,7 +8531,7 @@ app.delete('/api/admin/deportes/:id/eliminar-permanente', async (req, res) => {
     
     const deporteId = req.params.id;
     
-    // Iniciar transacción (usar query en lugar de execute para transacciones)
+    // Iniciar transacciÃ³n (usar query en lugar de execute para transacciones)
     await db.query('START TRANSACTION');
     
     try {
@@ -8552,7 +8556,7 @@ app.delete('/api/admin/deportes/:id/eliminar-permanente', async (req, res) => {
         [deporteId]
       );
       
-      // 4. Eliminar categorías del deporte
+      // 4. Eliminar categorÃ­as del deporte
       const [categoriasResult] = await db.execute(
         'DELETE FROM categorias WHERE deporte_id = ?',
         [deporteId]
@@ -8569,15 +8573,15 @@ app.delete('/api/admin/deportes/:id/eliminar-permanente', async (req, res) => {
         return res.status(404).json({ success: false, error: 'Deporte no encontrado' });
       }
       
-      // Confirmar transacción (usar query en lugar de execute)
+      // Confirmar transacciÃ³n (usar query en lugar de execute)
       await db.query('COMMIT');
       
-      // Limpiar caché
+      // Limpiar cachÃ©
       cache.flushAll();
       
-      console.log(`🗑️ Deporte ELIMINADO PERMANENTEMENTE: ID ${deporteId}`);
+      console.log(`ðŸ—‘ï¸ Deporte ELIMINADO PERMANENTEMENTE: ID ${deporteId}`);
       console.log(`   - Horarios eliminados: ${horariosResult.affectedRows}`);
-      console.log(`   - Categorías eliminadas: ${categoriasResult.affectedRows}`);
+      console.log(`   - CategorÃ­as eliminadas: ${categoriasResult.affectedRows}`);
       
       res.json({ 
         success: true, 
@@ -8588,19 +8592,19 @@ app.delete('/api/admin/deportes/:id/eliminar-permanente', async (req, res) => {
         }
       });
     } catch (error) {
-      // Revertir transacción en caso de error (usar query en lugar de execute)
+      // Revertir transacciÃ³n en caso de error (usar query en lugar de execute)
       await db.query('ROLLBACK');
       throw error;
     }
   } catch (error) {
-    console.error('❌ Error al eliminar deporte permanentemente:', error);
+    console.error('âŒ Error al eliminar deporte permanentemente:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // ==================== ENDPOINTS PLANES ====================
 
-// GET público (usado por selección de horarios)
+// GET pÃºblico (usado por selecciÃ³n de horarios)
 app.get('/api/planes', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -8609,7 +8613,7 @@ app.get('/api/planes', async (req, res) => {
     );
     res.json({ success: true, planes });
   } catch (error) {
-    console.error('❌ Error GET /api/planes:', error);
+    console.error('âŒ Error GET /api/planes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8623,7 +8627,7 @@ app.get('/api/admin/planes', async (req, res) => {
     );
     res.json({ success: true, planes });
   } catch (error) {
-    console.error('❌ Error GET /api/admin/planes:', error);
+    console.error('âŒ Error GET /api/admin/planes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8642,7 +8646,7 @@ app.post('/api/admin/planes', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, plan_id: result.insertId, mensaje: 'Plan creado correctamente' });
   } catch (error) {
-    console.error('❌ Error POST /api/admin/planes:', error);
+    console.error('âŒ Error POST /api/admin/planes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8660,7 +8664,7 @@ app.put('/api/admin/planes/:id', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, mensaje: 'Plan actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error PUT /api/admin/planes:', error);
+    console.error('âŒ Error PUT /api/admin/planes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8674,14 +8678,14 @@ app.delete('/api/admin/planes/:id', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, mensaje: 'Plan eliminado correctamente' });
   } catch (error) {
-    console.error('❌ Error DELETE /api/admin/planes:', error);
+    console.error('âŒ Error DELETE /api/admin/planes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // ==================== ENDPOINTS NIVELES ====================
 
-// GET público
+// GET pÃºblico
 app.get('/api/niveles', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -8690,7 +8694,7 @@ app.get('/api/niveles', async (req, res) => {
     );
     res.json({ success: true, niveles });
   } catch (error) {
-    console.error('❌ Error GET /api/niveles:', error);
+    console.error('âŒ Error GET /api/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8704,7 +8708,7 @@ app.get('/api/admin/niveles', async (req, res) => {
     );
     res.json({ success: true, niveles });
   } catch (error) {
-    console.error('❌ Error GET /api/admin/niveles:', error);
+    console.error('âŒ Error GET /api/admin/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8722,7 +8726,7 @@ app.post('/api/admin/niveles', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, nivel_id: result.insertId, mensaje: 'Nivel creado correctamente' });
   } catch (error) {
-    console.error('❌ Error POST /api/admin/niveles:', error);
+    console.error('âŒ Error POST /api/admin/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8740,7 +8744,7 @@ app.put('/api/admin/niveles/:id', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, mensaje: 'Nivel actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error PUT /api/admin/niveles:', error);
+    console.error('âŒ Error PUT /api/admin/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8754,7 +8758,7 @@ app.delete('/api/admin/niveles/:id', async (req, res) => {
     cache.flushAll();
     res.json({ success: true, mensaje: 'Nivel eliminado correctamente' });
   } catch (error) {
-    console.error('❌ Error DELETE /api/admin/niveles:', error);
+    console.error('âŒ Error DELETE /api/admin/niveles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8806,10 +8810,10 @@ app.get('/api/admin/horarios', async (req, res) => {
       ? await db.execute(query, params)
       : await db.execute(query);
     
-    console.log(`✅ Horarios obtenidos: ${horarios.length}`);
+    console.log(`âœ… Horarios obtenidos: ${horarios.length}`);
     res.json({ success: true, horarios });
   } catch (error) {
-    console.error('❌ Error al obtener horarios:', error);
+    console.error('âŒ Error al obtener horarios:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8844,13 +8848,13 @@ app.post('/api/admin/horarios', async (req, res) => {
       ]
     );
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Horario creado: ID ${result.insertId}`);
+    console.log(`âœ… Horario creado: ID ${result.insertId}`);
     res.json({ success: true, horario_id: result.insertId, mensaje: 'Horario creado correctamente' });
   } catch (error) {
-    console.error('❌ Error al crear horario:', error);
+    console.error('âŒ Error al crear horario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8884,18 +8888,18 @@ app.put('/api/admin/horarios/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Horario no encontrado' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Horario actualizado: ID ${horarioId}`);
+    console.log(`âœ… Horario actualizado: ID ${horarioId}`);
     res.json({ success: true, mensaje: 'Horario actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error al actualizar horario:', error);
+    console.error('âŒ Error al actualizar horario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Edición rápida de horario (solo campos esenciales)
+// EdiciÃ³n rÃ¡pida de horario (solo campos esenciales)
 app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -8903,7 +8907,7 @@ app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
     const horarioId = req.params.id;
     const { categoria, nivel, plan, ano_min, ano_max, hora_inicio, hora_fin, cupo_maximo, precio, deporte_id, dia, genero, estado } = req.body;
     
-    // Validar que el cupo máximo no sea menor a los cupos ocupados
+    // Validar que el cupo mÃ¡ximo no sea menor a los cupos ocupados
     if (cupo_maximo) {
       const [horarioActual] = await db.execute(
         'SELECT cupos_ocupados FROM horarios WHERE horario_id = ?',
@@ -8913,12 +8917,12 @@ app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
       if (horarioActual.length > 0 && cupo_maximo < horarioActual[0].cupos_ocupados) {
         return res.status(400).json({ 
           success: false, 
-          error: `El cupo máximo no puede ser menor a los cupos ocupados (${horarioActual[0].cupos_ocupados})` 
+          error: `El cupo mÃ¡ximo no puede ser menor a los cupos ocupados (${horarioActual[0].cupos_ocupados})` 
         });
       }
     }
     
-    // Construir query dinámico solo con los campos enviados
+    // Construir query dinÃ¡mico solo con los campos enviados
     const updates = [];
     const values = [];
     
@@ -8991,13 +8995,13 @@ app.put('/api/admin/horarios/:id/edicion-rapida', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Horario no encontrado' });
     }
     
-    // Limpiar caché para reflejar cambios en tiempo real
+    // Limpiar cachÃ© para reflejar cambios en tiempo real
     cache.flushAll();
     
-    console.log(`✅ Edición rápida aplicada: Horario ID ${horarioId}`);
+    console.log(`âœ… EdiciÃ³n rÃ¡pida aplicada: Horario ID ${horarioId}`);
     res.json({ success: true, mensaje: 'Horario actualizado correctamente' });
   } catch (error) {
-    console.error('❌ Error en edición rápida de horario:', error);
+    console.error('âŒ Error en ediciÃ³n rÃ¡pida de horario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -9020,7 +9024,7 @@ app.delete('/api/admin/horarios/:id', async (req, res) => {
     if (inscripciones[0].total > 0) {
       return res.status(400).json({ 
         success: false, 
-        error: `No se puede eliminar. Tiene ${inscripciones[0].total} inscripción(es) activa(s)` 
+        error: `No se puede eliminar. Tiene ${inscripciones[0].total} inscripciÃ³n(es) activa(s)` 
       });
     }
     
@@ -9033,7 +9037,7 @@ app.delete('/api/admin/horarios/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Horario no encontrado' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.del(getCacheKey('horarios'));
     
     res.json({ success: true, message: 'Horario desactivado correctamente' });
@@ -9056,7 +9060,7 @@ app.delete('/api/admin/horarios/:id/forzar', async (req, res) => {
     }
     cache.del(getCacheKey('horarios'));
     cache.flushAll();
-    console.log(`🗑️ Horario eliminado definitivamente: ID ${horarioId}`);
+    console.log(`ðŸ—‘ï¸ Horario eliminado definitivamente: ID ${horarioId}`);
     res.json({ success: true, message: 'Horario eliminado definitivamente' });
   } catch (error) {
     console.error('Error al eliminar horario definitivamente:', error);
@@ -9089,7 +9093,7 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
       });
     }
     
-    // Primero eliminar inscripcion_horarios (si existen) - ON DELETE CASCADE lo hará automáticamente
+    // Primero eliminar inscripcion_horarios (si existen) - ON DELETE CASCADE lo harÃ¡ automÃ¡ticamente
     // Pero por si acaso lo hacemos manualmente primero
     await db.execute(
       `DELETE ih FROM inscripcion_horarios ih
@@ -9099,7 +9103,7 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
       [dni]
     );
     
-    // Eliminar inscripciones (esto también eliminará inscripcion_horarios por CASCADE)
+    // Eliminar inscripciones (esto tambiÃ©n eliminarÃ¡ inscripcion_horarios por CASCADE)
     await db.execute(
       `DELETE i FROM inscripciones i
        JOIN alumnos a ON i.alumno_id = a.alumno_id
@@ -9107,7 +9111,7 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
       [dni]
     );
     
-    // Limpiar cachés
+    // Limpiar cachÃ©s
     cache.del(getCacheKey('inscritos', 'all_all'));
     cache.del(getCacheKey('inscripciones', dni));
     cache.del(getCacheKey('horarios'));
@@ -9127,7 +9131,7 @@ app.delete('/api/admin/inscripciones/:dni', async (req, res) => {
 // ==================== CONTROL DE PUERTA / CARNETS ====================
 
 // POST /api/admin/carnets/validar-acceso
-// Valida carnet en puerta, evalúa regla de pago mensual (días 1-5 vs 6+) y registra asistencia de puerta
+// Valida carnet en puerta, evalÃºa regla de pago mensual (dÃ­as 1-5 vs 6+) y registra asistencia de puerta
 const handlerValidarAccesoPuerta = async (req, res) => {
   try {
     const admin = req.admin || null;
@@ -9190,7 +9194,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
         success: true,
         activo: false,
         sin_clase_hoy: false,
-        aviso: 'MEMBRESÍA INACTIVA - No ha pagado mensualidad',
+        aviso: 'MEMBRESÃA INACTIVA - No ha pagado mensualidad',
         motivo: 'El alumno no tiene inscripciones activas',
         puede_autorizar: !!admin,
         alumno: {
@@ -9201,14 +9205,14 @@ const handlerValidarAccesoPuerta = async (req, res) => {
           nombre_completo: nombreCompleto,
           foto_carnet_url: alumno.foto_carnet_url,
           fecha_nacimiento: alumno.fecha_nacimiento,
-          deporte: 'Sin inscripción',
+          deporte: 'Sin inscripciÃ³n',
           plan: 'Inactivo'
         },
         horario_hoy: null
       });
     }
 
-    // 3. Fecha y hora local de Perú (UTC-5)
+    // 3. Fecha y hora local de PerÃº (UTC-5)
     const ahoraUtc = Date.now();
     const ahoraPeru = new Date(ahoraUtc - 5 * 3600 * 1000);
     const diaMes = ahoraPeru.getUTCDate();
@@ -9219,7 +9223,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     const mesActual = NOMBRES_MESES[ahoraPeru.getUTCMonth()];
     const anioActual = ahoraPeru.getUTCFullYear();
 
-    // 4. Validar si el alumno tiene clase el día de hoy
+    // 4. Validar si el alumno tiene clase el dÃ­a de hoy
     const DIAS_SEMANA_MAP = ['DOMINGO','LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO'];
     const norm = s => (s || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     const diaSemanaHoy = DIAS_SEMANA_MAP[ahoraPeru.getUTCDay()];
@@ -9234,7 +9238,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
         activo: false,
         sin_clase_hoy: true,
         aviso: `SIN CLASE PROGRAMADA PARA HOY (${diaSemanaHoy})`,
-        motivo: `El alumno no tiene horario programado para hoy ${diaSemanaHoy}. Sus días de entrenamiento son: ${diasInscritos.join(', ')}.`,
+        motivo: `El alumno no tiene horario programado para hoy ${diaSemanaHoy}. Sus dÃ­as de entrenamiento son: ${diasInscritos.join(', ')}.`,
         pase_entregado: false,
         asistencia_puerta_registrada: false,
         hora_ingreso: horaActualStr,
@@ -9247,8 +9251,8 @@ const handlerValidarAccesoPuerta = async (req, res) => {
           nombre_completo: nombreCompleto,
           foto_carnet_url: alumno.foto_carnet_url,
           fecha_nacimiento: alumno.fecha_nacimiento,
-          deporte: inscripciones[0]?.deporte || 'Fútbol',
-          plan: inscripciones[0]?.plan || 'Económico',
+          deporte: inscripciones[0]?.deporte || 'FÃºtbol',
+          plan: inscripciones[0]?.plan || 'EconÃ³mico',
           categoria: inscripciones[0]?.categoria || ''
         },
         horario_hoy: null,
@@ -9256,20 +9260,20 @@ const handlerValidarAccesoPuerta = async (req, res) => {
       });
     }
 
-    // Horario a asignar: el de hoy si existe, o el primero si fue forzado por administración
+    // Horario a asignar: el de hoy si existe, o el primero si fue forzado por administraciÃ³n
     const horarioFinal = horarioHoy || inscripciones[0];
     const horarioIdFinal = horarioFinal?.horario_id || null;
 
-    // 5. Evaluar Regla de Membresía (Día 1-5 vs Día 6+)
+    // 5. Evaluar Regla de MembresÃ­a (DÃ­a 1-5 vs DÃ­a 6+)
     let activo = false;
     let motivo = '';
 
     if (diaMes >= 1 && diaMes <= 5) {
-      // Días 1 al 5: Período regular de gracia para pagar mensualidad
+      // DÃ­as 1 al 5: PerÃ­odo regular de gracia para pagar mensualidad
       activo = true;
-      motivo = `Período regular de pago (Día ${diaMes} de 5 de ${mesActual})`;
+      motivo = `PerÃ­odo regular de pago (DÃ­a ${diaMes} de 5 de ${mesActual})`;
     } else {
-      // A partir del día 6: Se exige mensualidad del mes actual confirmada
+      // A partir del dÃ­a 6: Se exige mensualidad del mes actual confirmada
       const colAnio = global.COL_ANIO || 'anio';
       const [pagosMes] = await db.query(`
         SELECT pm.*
@@ -9285,7 +9289,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
         activo = true;
         motivo = `Mensualidad de ${mesActual} ${anioActual} confirmada`;
       } else {
-        // Verificar si es un alumno nuevo recién matriculado en este mes actual
+        // Verificar si es un alumno nuevo reciÃ©n matriculado en este mes actual
         const fechaCreacion = alumno.created_at ? new Date(alumno.created_at) : null;
         const inscritoEsteMes = fechaCreacion &&
           (fechaCreacion.getUTCFullYear() === anioActual) &&
@@ -9294,7 +9298,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
 
         if (inscritoEsteMes) {
           activo = true;
-          motivo = `Matrícula reciente confirmada (${mesActual} ${anioActual})`;
+          motivo = `MatrÃ­cula reciente confirmada (${mesActual} ${anioActual})`;
         } else {
           // Alumno sin mensualidad confirmada para este mes: INACTIVO
           const [pagosEstado] = await db.query(`
@@ -9306,9 +9310,9 @@ const handlerValidarAccesoPuerta = async (req, res) => {
 
           activo = false;
           if (pagosEstado.length > 0 && pagosEstado[0].estado === 'pendiente') {
-            motivo = `Comprobante de ${mesActual} subido, pendiente de aprobación por administración`;
+            motivo = `Comprobante de ${mesActual} subido, pendiente de aprobaciÃ³n por administraciÃ³n`;
           } else if (pagosEstado.length > 0 && pagosEstado[0].estado === 'rechazado') {
-            motivo = `El pago de mensualidad de ${mesActual} fue rechazado por administración`;
+            motivo = `El pago de mensualidad de ${mesActual} fue rechazado por administraciÃ³n`;
           } else {
             motivo = `Sin pago de mensualidad confirmado para ${mesActual} (Vencido desde el 6 de ${mesActual})`;
           }
@@ -9318,15 +9322,15 @@ const handlerValidarAccesoPuerta = async (req, res) => {
 
     let asistenciaPuertaRegistrada = false;
 
-    // 6. Si está activo o el admin forzó el ingreso manualmente (o pagó por clase):
-    // NOTA DE SEGURIDAD: Solo registra asistencia en puerta si quien valida tiene sesión de admin/encargado
+    // 6. Si estÃ¡ activo o el admin forzÃ³ el ingreso manualmente (o pagÃ³ por clase):
+    // NOTA DE SEGURIDAD: Solo registra asistencia en puerta si quien valida tiene sesiÃ³n de admin/encargado
     if (admin && (activo || forzar_ingreso || esPagoClase)) {
       if (horarioIdFinal) {
         // hora Lima (UTC-5) ya calculada en horaActualStr como HH:MM
         const horaPuertaLima = horaActualStr + ':00';
         const obsAsistencia = esPagoClase
           ? obsPagoClase
-          : (forzar_ingreso ? 'Ingreso autorizado manualmente por administración' : 'Escaneo en puerta (Membresía activa)');
+          : (forzar_ingreso ? 'Ingreso autorizado manualmente por administraciÃ³n' : 'Escaneo en puerta (MembresÃ­a activa)');
 
         await db.query(`
           INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, asistencia_puerta, hora_puerta, observaciones, registrado_por)
@@ -9352,7 +9356,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
           : (activo ? 'activa' : 'autorizada_manual');
         const obsLog = esPagoClase
           ? obsPagoClase
-          : (forzar_ingreso ? 'Autorizado manualmente por administración' : motivo);
+          : (forzar_ingreso ? 'Autorizado manualmente por administraciÃ³n' : motivo);
 
         // Log en accesos_puerta
         await db.query(`
@@ -9372,10 +9376,10 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     }
 
     const aviso = esPagoClase
-      ? `INGRESO AUTORIZADO — PAGO POR CLASE S/ ${montoClaseNum.toFixed(2)}`
+      ? `INGRESO AUTORIZADO â€” PAGO POR CLASE S/ ${montoClaseNum.toFixed(2)}`
       : (activo
-        ? 'MEMBRESÍA ACTIVA'
-        : (forzar_ingreso ? 'INGRESO AUTORIZADO POR ADMINISTRACIÓN' : 'MEMBRESÍA INACTIVA - No ha pagado mensualidad'));
+        ? 'MEMBRESÃA ACTIVA'
+        : (forzar_ingreso ? 'INGRESO AUTORIZADO POR ADMINISTRACIÃ“N' : 'MEMBRESÃA INACTIVA - No ha pagado mensualidad'));
 
     return res.json({
       success: true,
@@ -9400,7 +9404,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
         foto_carnet_url: alumno.foto_carnet_url,
         fecha_nacimiento: alumno.fecha_nacimiento,
         deporte: horarioFinal?.deporte || inscripciones[0]?.deporte || 'Deportes Jaguares',
-        plan: horarioFinal?.plan || inscripciones[0]?.plan || 'Económico',
+        plan: horarioFinal?.plan || inscripciones[0]?.plan || 'EconÃ³mico',
         categoria: horarioFinal?.categoria || ''
       },
       horario_hoy: horarioFinal ? {
@@ -9425,7 +9429,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
 app.post('/api/admin/carnets/validar-acceso', verificarAutenticacion, handlerValidarAccesoPuerta);
 app.post('/api/carnets/validar-acceso', verificarAutenticacion, handlerValidarAccesoPuerta);
 
-// GET /api/admin/alumnos/:dni/asistencias — historial de asistencias de un alumno con doble asistencia (profesor y puerta)
+// GET /api/admin/alumnos/:dni/asistencias â€” historial de asistencias de un alumno con doble asistencia (profesor y puerta)
 app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { dni } = req.params;
@@ -9492,7 +9496,7 @@ app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificar
   }
 });
 
-// DELETE /api/admin/alumnos/:dni — elimina inscripciones + alumno completamente
+// DELETE /api/admin/alumnos/:dni â€” elimina inscripciones + alumno completamente
 app.delete('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9516,7 +9520,7 @@ app.delete('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, as
     try { await db.execute('DELETE FROM alumnos_del_mes WHERE alumno_id = ?', [alumnoId]); } catch(e) { console.warn('alumnos_del_mes no existe, omitiendo:', e.message); }
     await db.execute('DELETE FROM alumnos WHERE alumno_id = ?', [alumnoId]);
 
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.del(getCacheKey('inscritos', 'all_all'));
     cache.del(getCacheKey('inscripciones', dni));
 
@@ -9527,9 +9531,9 @@ app.delete('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, as
   }
 });
 
-// ==================== ENDPOINTS CRUD CATEGORÍAS ====================
+// ==================== ENDPOINTS CRUD CATEGORÃAS ====================
 
-// Obtener todas las categorías o filtradas por deporte
+// Obtener todas las categorÃ­as o filtradas por deporte
 app.get('/api/admin/categorias', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9562,15 +9566,15 @@ app.get('/api/admin/categorias', async (req, res) => {
       ? await db.execute(query, params)
       : await db.execute(query);
     
-    console.log(`✅ Categorías obtenidas: ${categorias.length}`);
+    console.log(`âœ… CategorÃ­as obtenidas: ${categorias.length}`);
     res.json({ success: true, categorias });
   } catch (error) {
-    console.error('❌ Error al obtener categorías:', error);
+    console.error('âŒ Error al obtener categorÃ­as:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Crear nueva categoría
+// Crear nueva categorÃ­a
 app.post('/api/admin/categorias', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9593,22 +9597,22 @@ app.post('/api/admin/categorias', async (req, res) => {
       ]
     );
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Categoría creada: ${nombre} (ID: ${result.insertId})`);
-    res.json({ success: true, categoria_id: result.insertId, mensaje: 'Categoría creada correctamente' });
+    console.log(`âœ… CategorÃ­a creada: ${nombre} (ID: ${result.insertId})`);
+    res.json({ success: true, categoria_id: result.insertId, mensaje: 'CategorÃ­a creada correctamente' });
   } catch (error) {
-    console.error('❌ Error al crear categoría:', error);
+    console.error('âŒ Error al crear categorÃ­a:', error);
     if (error.code === 'ER_DUP_ENTRY') {
-      res.status(400).json({ success: false, error: 'Ya existe una categoría con ese nombre para este deporte' });
+      res.status(400).json({ success: false, error: 'Ya existe una categorÃ­a con ese nombre para este deporte' });
     } else {
       res.status(500).json({ success: false, error: error.message });
     }
   }
 });
 
-// Actualizar categoría
+// Actualizar categorÃ­a
 app.put('/api/admin/categorias/:id', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9633,25 +9637,25 @@ app.put('/api/admin/categorias/:id', async (req, res) => {
     );
     
     if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: 'Categoría no encontrada' });
+      return res.status(404).json({ success: false, error: 'CategorÃ­a no encontrada' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Categoría actualizada: ID ${categoriaId}`);
-    res.json({ success: true, mensaje: 'Categoría actualizada correctamente' });
+    console.log(`âœ… CategorÃ­a actualizada: ID ${categoriaId}`);
+    res.json({ success: true, mensaje: 'CategorÃ­a actualizada correctamente' });
   } catch (error) {
-    console.error('❌ Error al actualizar categoría:', error);
+    console.error('âŒ Error al actualizar categorÃ­a:', error);
     if (error.code === 'ER_DUP_ENTRY') {
-      res.status(400).json({ success: false, error: 'Ya existe una categoría con ese nombre para este deporte' });
+      res.status(400).json({ success: false, error: 'Ya existe una categorÃ­a con ese nombre para este deporte' });
     } else {
       res.status(500).json({ success: false, error: error.message });
     }
   }
 });
 
-// Eliminar categoría (soft delete)
+// Eliminar categorÃ­a (soft delete)
 app.delete('/api/admin/categorias/:id', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9677,21 +9681,21 @@ app.delete('/api/admin/categorias/:id', async (req, res) => {
     );
     
     if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: 'Categoría no encontrada' });
+      return res.status(404).json({ success: false, error: 'CategorÃ­a no encontrada' });
     }
     
-    // Limpiar caché
+    // Limpiar cachÃ©
     cache.flushAll();
     
-    console.log(`✅ Categoría desactivada: ID ${categoriaId}`);
-    res.json({ success: true, mensaje: 'Categoría desactivada correctamente' });
+    console.log(`âœ… CategorÃ­a desactivada: ID ${categoriaId}`);
+    res.json({ success: true, mensaje: 'CategorÃ­a desactivada correctamente' });
   } catch (error) {
-    console.error('❌ Error al eliminar categoría:', error);
+    console.error('âŒ Error al eliminar categorÃ­a:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Borrado definitivo de categoría
+// Borrado definitivo de categorÃ­a
 app.delete('/api/admin/categorias/:id/forzar', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9701,13 +9705,13 @@ app.delete('/api/admin/categorias/:id/forzar', async (req, res) => {
       [categoriaId]
     );
     if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: 'Categoría no encontrada' });
+      return res.status(404).json({ success: false, error: 'CategorÃ­a no encontrada' });
     }
     cache.flushAll();
-    console.log(`🗑️ Categoría eliminada definitivamente: ID ${categoriaId}`);
-    res.json({ success: true, mensaje: 'Categoría eliminada definitivamente' });
+    console.log(`ðŸ—‘ï¸ CategorÃ­a eliminada definitivamente: ID ${categoriaId}`);
+    res.json({ success: true, mensaje: 'CategorÃ­a eliminada definitivamente' });
   } catch (error) {
-    console.error('❌ Error al eliminar categoría:', error);
+    console.error('âŒ Error al eliminar categorÃ­a:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -9728,12 +9732,12 @@ app.get('/api/admin/deportes-activos', async (req, res) => {
     
     res.json({ success: true, deportes });
   } catch (error) {
-    console.error('❌ Error al obtener deportes activos:', error);
+    console.error('âŒ Error al obtener deportes activos:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Obtener estadísticas de un horario específico
+// Obtener estadÃ­sticas de un horario especÃ­fico
 app.get('/api/admin/horarios/:id/estadisticas', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
@@ -9757,7 +9761,7 @@ app.get('/api/admin/horarios/:id/estadisticas', async (req, res) => {
     
     res.json({ success: true, estadisticas: stats[0] });
   } catch (error) {
-    console.error('❌ Error al obtener estadísticas de horario:', error);
+    console.error('âŒ Error al obtener estadÃ­sticas de horario:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -9817,7 +9821,7 @@ app.get('/api/admin/reporte-alumnos', async (req, res) => {
     
     res.json({ success: true, alumnos });
   } catch (error) {
-    console.error('❌ Error al generar reporte de alumnos:', error);
+    console.error('âŒ Error al generar reporte de alumnos:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -9825,10 +9829,10 @@ app.get('/api/admin/reporte-alumnos', async (req, res) => {
 // Manejo de errores del servidor
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
-    console.error(`❌ Error: El puerto ${PORT} ya está en uso`);
+    console.error(`âŒ Error: El puerto ${PORT} ya estÃ¡ en uso`);
     console.error('   Cierra el otro proceso o usa un puerto diferente');
   } else {
-    console.error('❌ Error del servidor:', error);
+    console.error('âŒ Error del servidor:', error);
   }
   process.exit(1);
 });
@@ -9837,7 +9841,7 @@ server.on('error', (error) => {
 
 /**
  * PUT /api/admin/alumnos/:dni/notas
- * Guardar observación/nota del alumno
+ * Guardar observaciÃ³n/nota del alumno
  */
 app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
   try {
@@ -9849,11 +9853,11 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
     );
     const cacheKey = getCacheKey('consultas', dni);
     cache.del(cacheKey);
-    console.log(`📝 Observación actualizada para DNI ${dni}`);
-    res.json({ success: true, message: 'Observación guardada correctamente' });
+    console.log(`ðŸ“ ObservaciÃ³n actualizada para DNI ${dni}`);
+    res.json({ success: true, message: 'ObservaciÃ³n guardada correctamente' });
   } catch (error) {
-    console.error('❌ Error al guardar nota:', error);
-    res.status(500).json({ success: false, error: 'Error al guardar la observación' });
+    console.error('âŒ Error al guardar nota:', error);
+    res.status(500).json({ success: false, error: 'Error al guardar la observaciÃ³n' });
   }
 });
 
@@ -9863,7 +9867,7 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
   /**
    * POST /api/admin/alumnos/:dni/notas
 /**
- * Guardar observación/nota del alumno (compatibilidad)
+ * Guardar observaciÃ³n/nota del alumno (compatibilidad)
  */
   app.post('/api/admin/alumnos/:dni/notas', async (req, res) => {
     try {
@@ -9875,11 +9879,11 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
       );
       const cacheKey = getCacheKey('consultas', dni);
       cache.del(cacheKey);
-      console.log(`📝 Observación actualizada para DNI ${dni} (POST)`);
-      res.json({ success: true, message: 'Observación guardada correctamente' });
+      console.log(`ðŸ“ ObservaciÃ³n actualizada para DNI ${dni} (POST)`);
+      res.json({ success: true, message: 'ObservaciÃ³n guardada correctamente' });
     } catch (error) {
-      console.error('❌ Error al guardar nota (POST):', error);
-      res.status(500).json({ success: false, message: 'Error al guardar observación' });
+      console.error('âŒ Error al guardar nota (POST):', error);
+      res.status(500).json({ success: false, message: 'Error al guardar observaciÃ³n' });
     }
   });
 
@@ -9889,7 +9893,7 @@ app.put('/api/admin/alumnos/:dni/notas', async (req, res) => {
 
 /**
  * GET /api/admin/buscar-numero-operacion
- * Buscar pagos por número de operación (anti-fraude)
+ * Buscar pagos por nÃºmero de operaciÃ³n (anti-fraude)
  */
 app.get('/api/admin/buscar-numero-operacion', async (req, res) => {
   try {
@@ -9928,10 +9932,10 @@ app.get('/api/admin/buscar-numero-operacion', async (req, res) => {
       resultados,
       total: resultados.length,
       es_duplicado: esDuplicado,
-      mensaje_duplicado: esDuplicado ? `⚠️ ALERTA: El número de operación "${numOp}" está registrado por ${exactos.length} alumnos diferentes` : null
+      mensaje_duplicado: esDuplicado ? `âš ï¸ ALERTA: El nÃºmero de operaciÃ³n "${numOp}" estÃ¡ registrado por ${exactos.length} alumnos diferentes` : null
     });
   } catch (error) {
-    console.error('❌ Error buscando número de operación:', error);
+    console.error('âŒ Error buscando nÃºmero de operaciÃ³n:', error);
     res.status(500).json({ success: false, error: 'Error al buscar' });
   }
 });
@@ -9985,7 +9989,7 @@ app.get('/api/admin/inscripciones', async (req, res) => {
       params.push(estado_pago);
     }
     
-    // Búsqueda por DNI, nombre o apellido
+    // BÃºsqueda por DNI, nombre o apellido
     if (buscar) {
       query += ' AND (a.dni LIKE ? OR a.nombres LIKE ? OR CONCAT(a.apellido_paterno, " ", a.apellido_materno) LIKE ?)';
       const searchPattern = `%${buscar}%`;
@@ -9994,13 +9998,13 @@ app.get('/api/admin/inscripciones', async (req, res) => {
     
     query += ' GROUP BY a.alumno_id ORDER BY a.created_at DESC';
     
-    // Paginación
+    // PaginaciÃ³n
     const offset = (parseInt(pagina) - 1) * parseInt(limite);
     query += ` LIMIT ${parseInt(limite)} OFFSET ${offset}`;
     
     const [inscripciones] = await db.query(query, params);
     
-    // Contar total para paginación
+    // Contar total para paginaciÃ³n
     let countQuery = 'SELECT COUNT(DISTINCT a.alumno_id) as total FROM alumnos a WHERE 1=1';
     const countParams = [];
     
@@ -10112,7 +10116,7 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       ORDER BY d.nombre, h.dia, h.hora_inicio
     `, [usuario.alumno_id]);
     
-    // Agrupar horarios por inscripción para evitar duplicados en el resumen
+    // Agrupar horarios por inscripciÃ³n para evitar duplicados en el resumen
     const inscripcionesMap = new Map();
     inscripcionesRaw.forEach(row => {
       const key = row.inscripcion_id;
@@ -10166,11 +10170,11 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       ins.horarios.forEach(h => diasActivos.add(h.dia));
     });
     
-    console.log('📤 ENVIANDO RESPUESTA ADMIN DETALLE DNI:', dni);
+    console.log('ðŸ“¤ ENVIANDO RESPUESTA ADMIN DETALLE DNI:', dni);
     console.log('   - Alumno ID:', usuario.alumno_id);
-    console.log('   - DNI Frontal URL:', usuario.dni_frontal_url ? 'SÍ' : 'NO');
-    console.log('   - DNI Reverso URL:', usuario.dni_reverso_url ? 'SÍ' : 'NO');
-    console.log('   - Foto Carnet URL:', usuario.foto_carnet_url ? 'SÍ' : 'NO');
+    console.log('   - DNI Frontal URL:', usuario.dni_frontal_url ? 'SÃ' : 'NO');
+    console.log('   - DNI Reverso URL:', usuario.dni_reverso_url ? 'SÃ' : 'NO');
+    console.log('   - Foto Carnet URL:', usuario.foto_carnet_url ? 'SÃ' : 'NO');
     console.log('   - Estado Pago:', usuario.estado_pago);
     
     const responseData = {
@@ -10178,16 +10182,16 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
       alumno: usuario, // Cambiar "usuario" a "alumno" para consistencia con Google Sheets
       inscripciones, // Array expandido para mostrar cada horario
       resumen: {
-        total_inscripciones: inscripcionesUnicas.length, // Contar inscripciones únicas
+        total_inscripciones: inscripcionesUnicas.length, // Contar inscripciones Ãºnicas
         deportes_distintos: new Set(inscripcionesUnicas.map(i => i.deporte)).size,
         dias_activos: diasActivos.size,
-        monto_total: inscripcionesUnicas.reduce((sum, i) => sum + (parseFloat(i.precio) || 0), 0) // Sumar precio solo una vez por inscripción
+        monto_total: inscripcionesUnicas.reduce((sum, i) => sum + (parseFloat(i.precio) || 0), 0) // Sumar precio solo una vez por inscripciÃ³n
       }
     };
     
     res.json(responseData);
   } catch (error) {
-    console.error('Error al obtener detalle de inscripción:', error);
+    console.error('Error al obtener detalle de inscripciÃ³n:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -10222,11 +10226,11 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     if (alumno.estado_pago === 'confirmado' && inscPendientes.length === 0) {
       return res.status(400).json({ 
         success: false, 
-        error: 'El pago ya está confirmado y no hay inscripciones pendientes' 
+        error: 'El pago ya estÃ¡ confirmado y no hay inscripciones pendientes' 
       });
     }
     
-    // Si el admin no envió monto, calcularlo de las inscripciones pendientes del alumno
+    // Si el admin no enviÃ³ monto, calcularlo de las inscripciones pendientes del alumno
     let montoFinal = monto_pago ? parseFloat(monto_pago) : null;
     if (!montoFinal) {
       const [inscPend] = await db.query(
@@ -10234,11 +10238,11 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
         [alumno.alumno_id]
       );
       montoFinal = parseFloat(inscPend[0]?.total || 0) || null;
-      if (montoFinal) console.log(`💰 Monto calculado automáticamente: S/ ${montoFinal} para DNI ${dni}`);
+      if (montoFinal) console.log(`ðŸ’° Monto calculado automÃ¡ticamente: S/ ${montoFinal} para DNI ${dni}`);
     }
 
     // Actualizar estado de pago en MySQL
-    // COALESCE preserva el numero_operacion que cargó el alumno si el admin no envía uno nuevo
+    // COALESCE preserva el numero_operacion que cargÃ³ el alumno si el admin no envÃ­a uno nuevo
     await db.query(`
       UPDATE alumnos 
       SET 
@@ -10259,17 +10263,17 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     `, [alumno.alumno_id]);
     
     // ==================== REGISTRAR PAGO MENSUAL DEL MES ACTUAL ====================
-    // Cuando el admin confirma la inscripción, el pago de inscripción ya cubre
+    // Cuando el admin confirma la inscripciÃ³n, el pago de inscripciÃ³n ya cubre
     // el primer mes. Se inserta un pago_mensual confirmado para que el alumno
     // no aparezca como "pendiente" en el reporte de pagos del mes.
     try {
       const ahora = new Date();
-      // El sistema usa nombres de mes en español (igual que el resto de pagos_mensuales)
+      // El sistema usa nombres de mes en espaÃ±ol (igual que el resto de pagos_mensuales)
       const NOMBRES_MESES_NORM = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const mesNombreActual = NOMBRES_MESES_NORM[ahora.getMonth()];
       const anioActual = ahora.getFullYear();
-      // Usar la misma columna dinámica que el resto del sistema (puede ser 'año' o 'anio')
-      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'año' — fallback unicode-safe
+      // Usar la misma columna dinÃ¡mica que el resto del sistema (puede ser 'aÃ±o' o 'anio')
+      const colYear = global.COL_ANIO || 'a\u00f1o'; // 'aÃ±o' â€” fallback unicode-safe
 
       // Calcular monto total de las mensualidades activas del alumno
       const [inscripcionesActivas] = await db.query(`
@@ -10286,11 +10290,11 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
           "VALUES (?, ?, ?, ?, 'confirmado', NOW(), NOW())",
           [alumno.alumno_id, mesNombreActual, anioActual, montoMensual]
         );
-        console.log(`✅ Pago mensual de ${mesNombreActual}/${anioActual} registrado como confirmado para alumno ID ${alumno.alumno_id} (S/ ${montoMensual})`);
+        console.log(`âœ… Pago mensual de ${mesNombreActual}/${anioActual} registrado como confirmado para alumno ID ${alumno.alumno_id} (S/ ${montoMensual})`);
       }
     } catch (pagoError) {
-      // No fallar la confirmación si esto falla
-      console.warn('⚠️ No se pudo registrar pago mensual automático:', pagoError.message);
+      // No fallar la confirmaciÃ³n si esto falla
+      console.warn('âš ï¸ No se pudo registrar pago mensual automÃ¡tico:', pagoError.message);
     }
 
     // Obtener inscripciones activadas
@@ -10305,7 +10309,7 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
     
     // ==================== SINCRONIZAR CON GOOGLE SHEETS ====================
     try {
-      console.log(`📤 Sincronizando confirmación de pago con Google Sheets para DNI ${dni}...`);
+      console.log(`ðŸ“¤ Sincronizando confirmaciÃ³n de pago con Google Sheets para DNI ${dni}...`);
       
       const sheetPayload = {
         action: 'confirmar_pago',
@@ -10326,18 +10330,18 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
       const sheetData = await sheetResponse.json();
       
       if (sheetData.success) {
-        console.log(`✅ Pago confirmado en Google Sheets para DNI ${dni}`);
+        console.log(`âœ… Pago confirmado en Google Sheets para DNI ${dni}`);
       } else {
-        console.warn(`⚠️ No se pudo confirmar en Google Sheets: ${sheetData.error || 'Error desconocido'}`);
+        console.warn(`âš ï¸ No se pudo confirmar en Google Sheets: ${sheetData.error || 'Error desconocido'}`);
       }
     } catch (sheetError) {
-      console.error('❌ Error al sincronizar con Google Sheets:', sheetError.message);
-      // No fallar la operación si Google Sheets falla, MySQL es la fuente principal
+      console.error('âŒ Error al sincronizar con Google Sheets:', sheetError.message);
+      // No fallar la operaciÃ³n si Google Sheets falla, MySQL es la fuente principal
     }
     
-    // ==================== INVALIDAR CACHÉ ====================
+    // ==================== INVALIDAR CACHÃ‰ ====================
     invalidateDNICache(dni);
-    console.log(`🗑️ Caché invalidado para DNI ${dni}`);
+    console.log(`ðŸ—‘ï¸ CachÃ© invalidado para DNI ${dni}`);
     
     res.json({
       success: true,
@@ -10354,7 +10358,7 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
 
 /**
  * PUT /api/admin/inscripciones/activar/:inscripcionId
- * Activar una inscripción específica (por deporte)
+ * Activar una inscripciÃ³n especÃ­fica (por deporte)
  */
 app.put('/api/admin/inscripciones/activar/:inscripcionId', async (req, res) => {
   try {
@@ -10369,13 +10373,13 @@ app.put('/api/admin/inscripciones/activar/:inscripcionId', async (req, res) => {
     );
     
     if (inscripciones.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
     
     const inscripcion = inscripciones[0];
     
     if (inscripcion.estado === 'activa') {
-      return res.status(400).json({ success: false, error: 'La inscripción ya está activa' });
+      return res.status(400).json({ success: false, error: 'La inscripciÃ³n ya estÃ¡ activa' });
     }
     
     await db.query(
@@ -10383,28 +10387,28 @@ app.put('/api/admin/inscripciones/activar/:inscripcionId', async (req, res) => {
       [inscripcionId]
     );
     
-    // Invalidar caché del alumno
+    // Invalidar cachÃ© del alumno
     const [alumnoRows] = await db.query('SELECT dni FROM alumnos WHERE alumno_id = ?', [inscripcion.alumno_id]);
     if (alumnoRows.length > 0) {
       invalidateDNICache(alumnoRows[0].dni);
     }
     
-    console.log(`✅ Inscripción ${inscripcionId} (${inscripcion.deporte}) activada manualmente`);
+    console.log(`âœ… InscripciÃ³n ${inscripcionId} (${inscripcion.deporte}) activada manualmente`);
     
     res.json({
       success: true,
-      mensaje: `Inscripción de ${inscripcion.deporte} activada exitosamente`,
+      mensaje: `InscripciÃ³n de ${inscripcion.deporte} activada exitosamente`,
       deporte: inscripcion.deporte
     });
   } catch (error) {
-    console.error('Error al activar inscripción:', error);
+    console.error('Error al activar inscripciÃ³n:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
  * PUT /api/admin/inscripciones/pendiente/:inscripcionId
- * Marcar una inscripción específica como pendiente (por deporte)
+ * Marcar una inscripciÃ³n especÃ­fica como pendiente (por deporte)
  */
 app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) => {
   try {
@@ -10419,13 +10423,13 @@ app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) =>
     );
     
     if (inscripciones.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
     
     const inscripcion = inscripciones[0];
     
     if (inscripcion.estado === 'pendiente') {
-      return res.status(400).json({ success: false, error: 'La inscripción ya está pendiente' });
+      return res.status(400).json({ success: false, error: 'La inscripciÃ³n ya estÃ¡ pendiente' });
     }
     
     await db.query(
@@ -10438,7 +10442,7 @@ app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) =>
       invalidateDNICache(alumnoRows[0].dni);
     }
     
-    console.log(`⏳ Inscripción ${inscripcionId} (${inscripcion.deporte}) marcada como pendiente`);
+    console.log(`â³ InscripciÃ³n ${inscripcionId} (${inscripcion.deporte}) marcada como pendiente`);
     
     res.json({
       success: true,
@@ -10459,14 +10463,14 @@ app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) =>
 /**
  * DELETE /api/admin/inscripciones/individual/:inscripcionId
  * DELETE /api/admin/inscripcion/:inscripcionId
- * Eliminar una inscripción específica (por inscripcion_id) sin afectar otras inscripciones del alumno
+ * Eliminar una inscripciÃ³n especÃ­fica (por inscripcion_id) sin afectar otras inscripciones del alumno
  */
 app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/inscripcion/:inscripcionId'], async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
     const { inscripcionId } = req.params;
 
-    // 1. Obtener datos de la inscripción a eliminar
+    // 1. Obtener datos de la inscripciÃ³n a eliminar
     const [rows] = await db.query(`
       SELECT i.inscripcion_id, i.alumno_id, i.estado, d.nombre as deporte, a.dni, a.nombres, a.apellido_paterno
       FROM inscripciones i
@@ -10476,14 +10480,14 @@ app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/in
     `, [inscripcionId]);
 
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
 
     const ins = rows[0];
     const alumnoId = ins.alumno_id;
     const dni = ins.dni;
 
-    // 2. Contar cuántas otras inscripciones activas/pendientes le quedan al alumno
+    // 2. Contar cuÃ¡ntas otras inscripciones activas/pendientes le quedan al alumno
     const [restantes] = await db.query(`
       SELECT COUNT(*) as total
       FROM inscripciones
@@ -10492,17 +10496,17 @@ app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/in
 
     const tieneOtras = restantes[0].total > 0;
 
-    // 3. Eliminar la inscripción específica
-    // Se eliminan los horarios asociados para activar el trigger de liberación de cupos
+    // 3. Eliminar la inscripciÃ³n especÃ­fica
+    // Se eliminan los horarios asociados para activar el trigger de liberaciÃ³n de cupos
     await db.query('DELETE FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcionId]);
     await db.query('DELETE FROM inscripciones WHERE inscripcion_id = ?', [inscripcionId]);
 
-    // 4. Si era su única inscripción activa, actualizar estado del alumno a 'inactivo'
+    // 4. Si era su Ãºnica inscripciÃ³n activa, actualizar estado del alumno a 'inactivo'
     if (!tieneOtras) {
       await db.query("UPDATE alumnos SET estado = 'inactivo' WHERE alumno_id = ?", [alumnoId]);
-      console.log(`🔴 Alumno ${dni} marcado inactivo (sin más inscripciones activas tras borrar inscripción ${inscripcionId})`);
+      console.log(`ðŸ”´ Alumno ${dni} marcado inactivo (sin mÃ¡s inscripciones activas tras borrar inscripciÃ³n ${inscripcionId})`);
     } else {
-      console.log(`🟢 Alumno ${dni} permanece activo con ${restantes[0].total} inscripción(es) activa(s)`);
+      console.log(`ðŸŸ¢ Alumno ${dni} permanece activo con ${restantes[0].total} inscripciÃ³n(es) activa(s)`);
     }
 
     // 5. Ajustar mensualidades en pagos_mensuales si quedaron pendientes del mes actual
@@ -10526,7 +10530,7 @@ app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/in
       console.warn('Advertencia al recalcular pagos_mensuales:', ePm.message);
     }
 
-    // 6. Limpiar cachés
+    // 6. Limpiar cachÃ©s
     if (typeof invalidateDNICache === 'function') {
       invalidateDNICache(dni);
     }
@@ -10536,17 +10540,17 @@ app.delete(['/api/admin/inscripciones/individual/:inscripcionId', '/api/admin/in
     const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
     if (inscritosKeys.length > 0) cache.del(inscritosKeys);
 
-    console.log(`🗑️ Inscripción ${inscripcionId} (${ins.deporte}) eliminada exitosamente para DNI ${dni}`);
+    console.log(`ðŸ—‘ï¸ InscripciÃ³n ${inscripcionId} (${ins.deporte}) eliminada exitosamente para DNI ${dni}`);
 
-    const deporteLimpio = String(ins.deporte || '').replace(/FÃºtbol|FÃ°tbol|F\uFFFDtbol/gi, 'Fútbol');
+    const deporteLimpio = String(ins.deporte || '').replace(/FÃƒÂºtbol|FÃƒÂ°tbol|F\uFFFDtbol/gi, 'FÃºtbol');
     return res.json({
       success: true,
-      mensaje: `Inscripción de ${deporteLimpio} eliminada correctamente`,
+      mensaje: `InscripciÃ³n de ${deporteLimpio} eliminada correctamente`,
       tieneOtrasInscripciones: tieneOtras
     });
 
   } catch (error) {
-    console.error('Error al eliminar inscripción individual:', error);
+    console.error('Error al eliminar inscripciÃ³n individual:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -10584,9 +10588,9 @@ app.put('/api/admin/inscripciones/:dni/rechazar-pago', async (req, res) => {
       WHERE alumno_id = ?
     `, [alumno.alumno_id]);
     
-    // Invalidar caché
+    // Invalidar cachÃ©
     invalidateDNICache(dni);
-    console.log(`🗑️ Caché invalidado para DNI ${dni} (pago rechazado)`);
+    console.log(`ðŸ—‘ï¸ CachÃ© invalidado para DNI ${dni} (pago rechazado)`);
     
     res.json({
       success: true,
@@ -10600,7 +10604,7 @@ app.put('/api/admin/inscripciones/:dni/rechazar-pago', async (req, res) => {
 
 /**
  * POST /api/admin/inscripciones/:inscripcionId/asignar-horarios
- * Asignar horarios a una inscripción que no tiene horarios guardados
+ * Asignar horarios a una inscripciÃ³n que no tiene horarios guardados
  * Body: { horarioIds: [1, 2, 3] }
  */
 app.post('/api/admin/inscripciones/:inscripcionId/asignar-horarios', async (req, res) => {
@@ -10612,14 +10616,14 @@ app.post('/api/admin/inscripciones/:inscripcionId/asignar-horarios', async (req,
       return res.status(400).json({ success: false, error: 'Debe proporcionar al menos un horario' });
     }
     
-    // Verificar que la inscripción existe
+    // Verificar que la inscripciÃ³n existe
     const [inscripciones] = await db.query(
       'SELECT inscripcion_id, deporte_id FROM inscripciones WHERE inscripcion_id = ?',
       [inscripcionId]
     );
     
     if (inscripciones.length === 0) {
-      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+      return res.status(404).json({ success: false, error: 'InscripciÃ³n no encontrada' });
     }
     
     const inscripcion = inscripciones[0];
@@ -10631,16 +10635,16 @@ app.post('/api/admin/inscripciones/:inscripcionId/asignar-horarios', async (req,
     );
     
     if (horariosValidos.length === 0) {
-      return res.status(400).json({ success: false, error: 'Los horarios no son válidos o no pertenecen al deporte de esta inscripción' });
+      return res.status(400).json({ success: false, error: 'Los horarios no son vÃ¡lidos o no pertenecen al deporte de esta inscripciÃ³n' });
     }
     
-    // Eliminar horarios anteriores de esta inscripción
+    // Eliminar horarios anteriores de esta inscripciÃ³n
     await db.query('DELETE FROM inscripcion_horarios WHERE inscripcion_id = ?', [inscripcionId]);
     
     // Insertar nuevos horarios
     let horariosGuardados = 0;
     for (const horarioId of horarioIds) {
-      // Verificar que el horario está en la lista de válidos
+      // Verificar que el horario estÃ¡ en la lista de vÃ¡lidos
       if (horariosValidos.some(h => h.horario_id === parseInt(horarioId))) {
         await db.query(
           'INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)',
@@ -10650,7 +10654,7 @@ app.post('/api/admin/inscripciones/:inscripcionId/asignar-horarios', async (req,
       }
     }
     
-    console.log(`✅ Asignados ${horariosGuardados} horarios a inscripción ${inscripcionId}`);
+    console.log(`âœ… Asignados ${horariosGuardados} horarios a inscripciÃ³n ${inscripcionId}`);
     
     res.json({
       success: true,
@@ -10665,7 +10669,7 @@ app.post('/api/admin/inscripciones/:inscripcionId/asignar-horarios', async (req,
 
 /**
  * GET /api/admin/horarios-deporte/:deporteId
- * Obtener horarios disponibles para un deporte específico (para asignación manual)
+ * Obtener horarios disponibles para un deporte especÃ­fico (para asignaciÃ³n manual)
  */
 app.get('/api/admin/horarios-deporte/:deporteId', async (req, res) => {
   try {
@@ -10685,7 +10689,7 @@ app.get('/api/admin/horarios-deporte/:deporteId', async (req, res) => {
       FROM horarios h
       WHERE h.deporte_id = ? AND h.estado = 'activo'
       ORDER BY 
-        FIELD(h.dia, 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'),
+        FIELD(h.dia, 'LUNES', 'MARTES', 'MIÃ‰RCOLES', 'JUEVES', 'VIERNES', 'SÃBADO', 'DOMINGO'),
         h.hora_inicio
     `, [deporteId]);
     
@@ -10701,7 +10705,7 @@ app.get('/api/admin/horarios-deporte/:deporteId', async (req, res) => {
 
 /**
  * GET /api/admin/reportes/alumnos
- * Generar reporte de alumnos por deporte y/o día
+ * Generar reporte de alumnos por deporte y/o dÃ­a
  * Query params: deporte_id, dia, categoria, estado (activa|todas)
  */
 app.get('/api/admin/reportes/alumnos', async (req, res) => {
@@ -10777,7 +10781,7 @@ app.get('/api/admin/reportes/alumnos', async (req, res) => {
     // Agrupar por deporte + horario
     const agrupado = {};
     alumnos.forEach(alumno => {
-      // Crear clave única por deporte, día, hora y categoría
+      // Crear clave Ãºnica por deporte, dÃ­a, hora y categorÃ­a
       const key = `${alumno.deporte}_${alumno.dia || 'sin-horario'}_${alumno.hora_inicio || 'sin-hora'}_${alumno.categoria || 'sin-categoria'}`;
       
       if (!agrupado[key]) {
@@ -10786,7 +10790,7 @@ app.get('/api/admin/reportes/alumnos', async (req, res) => {
           dia: alumno.dia || 'Sin horario',
           hora_inicio: alumno.hora_inicio || '',
           hora_fin: alumno.hora_fin || '',
-          categoria: alumno.categoria || 'Sin categoría',
+          categoria: alumno.categoria || 'Sin categorÃ­a',
           nivel: alumno.nivel || '',
           alumnos: []
         };
@@ -10809,7 +10813,7 @@ app.get('/api/admin/reportes/alumnos', async (req, res) => {
 
 /**
  * GET /api/admin/estadisticas/inscripciones
- * Estadísticas generales de inscripciones
+ * EstadÃ­sticas generales de inscripciones
  */
 app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
   try {
@@ -10858,7 +10862,7 @@ app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error al obtener estadísticas:', error);
+    console.error('Error al obtener estadÃ­sticas:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -10868,49 +10872,49 @@ app.get('/api/admin/estadisticas/inscripciones', async (req, res) => {
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-const CHAT_SYSTEM_PROMPT = `Eres el asistente de administración de JAGUARES, una academia deportiva en Perú.
-Tu función es ayudar al administrador a consultar información de la base de datos de forma conversacional.
+const CHAT_SYSTEM_PROMPT = `Eres el asistente de administraciÃ³n de JAGUARES, una academia deportiva en PerÃº.
+Tu funciÃ³n es ayudar al administrador a consultar informaciÃ³n de la base de datos de forma conversacional.
 
-Cuando la pregunta requiera datos de la BD, responde ÚNICAMENTE con un JSON:
-{"tipo": "sql", "query": "SELECT ...", "descripcion": "qué hace el query"}
+Cuando la pregunta requiera datos de la BD, responde ÃšNICAMENTE con un JSON:
+{"tipo": "sql", "query": "SELECT ...", "descripcion": "quÃ© hace el query"}
 
 Si NO necesita datos de la BD, responde con:
-{"tipo": "respuesta", "texto": "tu respuesta aquí"}
+{"tipo": "respuesta", "texto": "tu respuesta aquÃ­"}
 
 REGLAS ESTRICTAS:
 - Solo SELECT, NUNCA INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE
 - No consultar tabla: administradores
 - No mostrar columnas: contrasena, hash_contrasena, password
-- Siempre agregar LIMIT 100 máximo
-- Usa JOINs cuando necesites info de múltiples tablas
-- Los nombres propios de alumnos están en columnas separadas: nombres, apellido_paterno, apellido_materno
-- Para búsqueda por nombre usa LIKE '%valor%' en nombres o apellido_paterno
+- Siempre agregar LIMIT 100 mÃ¡ximo
+- Usa JOINs cuando necesites info de mÃºltiples tablas
+- Los nombres propios de alumnos estÃ¡n en columnas separadas: nombres, apellido_paterno, apellido_materno
+- Para bÃºsqueda por nombre usa LIKE '%valor%' en nombres o apellido_paterno
 
 DEFINICIONES IMPORTANTES (usa SIEMPRE estas definiciones):
-- "inscritos" / "lista de inscritos" / "alumnos inscritos" = alumnos con inscripción estado IN ('activa','pendiente'). Query: SELECT COUNT(DISTINCT a.alumno_id) FROM alumnos a JOIN inscripciones i ON a.alumno_id = i.alumno_id WHERE i.estado IN ('activa','pendiente')
-- "todos los alumnos en el sistema" = SELECT COUNT(*) FROM alumnos (incluye datos históricos/cancelados)
+- "inscritos" / "lista de inscritos" / "alumnos inscritos" = alumnos con inscripciÃ³n estado IN ('activa','pendiente'). Query: SELECT COUNT(DISTINCT a.alumno_id) FROM alumnos a JOIN inscripciones i ON a.alumno_id = i.alumno_id WHERE i.estado IN ('activa','pendiente')
+- "todos los alumnos en el sistema" = SELECT COUNT(*) FROM alumnos (incluye datos histÃ³ricos/cancelados)
 - "alumnos activos" = alumnos con estado='activo' en tabla alumnos
 - "pagos pendientes" = alumnos con estado_pago='pendiente'
-- Cuando el admin pregunta "cuántos tengo" sin contexto, asume INSCRITOS con estado='activa' o 'pendiente'
+- Cuando el admin pregunta "cuÃ¡ntos tengo" sin contexto, asume INSCRITOS con estado='activa' o 'pendiente'
 
-FÓRMULAS FINANCIERAS (Dashboard Financiero):
+FÃ“RMULAS FINANCIERAS (Dashboard Financiero):
 - "ingresos totales" / "total ingresos" = SUM(matriculas_pagadas) + SUM(precio_mensual) de inscripciones activas:
   SELECT COALESCE(SUM(CASE WHEN i.matricula_pagada=1 THEN d.matricula ELSE 0 END),0) + COALESCE(SUM(i.precio_mensual),0) as total_ingresos FROM inscripciones i JOIN deportes d ON i.deporte_id=d.deporte_id WHERE i.estado='activa'
-- "ingresos del mes" / "ingresos este mes" = mismo cálculo pero filtrado por MONTH(i.fecha_inscripcion)=MONTH(CURRENT_DATE()) AND YEAR(i.fecha_inscripcion)=YEAR(CURRENT_DATE())
-- "ingresos de hoy" = mismo cálculo con DATE(i.fecha_inscripcion)=CURRENT_DATE()
+- "ingresos del mes" / "ingresos este mes" = mismo cÃ¡lculo pero filtrado por MONTH(i.fecha_inscripcion)=MONTH(CURRENT_DATE()) AND YEAR(i.fecha_inscripcion)=YEAR(CURRENT_DATE())
+- "ingresos de hoy" = mismo cÃ¡lculo con DATE(i.fecha_inscripcion)=CURRENT_DATE()
 - "mensualidades" = SUM(i.precio_mensual) FROM inscripciones WHERE estado='activa'
-- "matrículas cobradas" = SUM(CASE WHEN matricula_pagada=1 THEN d.matricula ELSE 0 END)
-- "ingresos por deporte" = agrupar por d.nombre con SUM de mensualidades + matrículas de inscripciones activas
-- "ingresos por alumno" = agrupar por a.alumno_id con SUM de mensualidades + matrículas, JOIN con alumnos e inscripciones activas
-- "alumnos con más deportes" = COUNT(inscripciones activas) por alumno, ORDER BY cantidad DESC
+- "matrÃ­culas cobradas" = SUM(CASE WHEN matricula_pagada=1 THEN d.matricula ELSE 0 END)
+- "ingresos por deporte" = agrupar por d.nombre con SUM de mensualidades + matrÃ­culas de inscripciones activas
+- "ingresos por alumno" = agrupar por a.alumno_id con SUM de mensualidades + matrÃ­culas, JOIN con alumnos e inscripciones activas
+- "alumnos con mÃ¡s deportes" = COUNT(inscripciones activas) por alumno, ORDER BY cantidad DESC
 
 ESQUEMA DE LA BASE DE DATOS:
 
 alumnos: alumno_id, dni, nombres, apellido_paterno, apellido_materno, fecha_nacimiento, sexo(Masculino/Femenino), telefono, email, estado(activo/inactivo/suspendido), estado_pago(pendiente/confirmado/rechazado), apoderado, telefono_apoderado, created_at
 
-inscripciones: inscripcion_id, alumno_id, deporte_id, estado(pendiente/activa/cancelada/suspendida), plan(Económico/Estándar/Premium), precio_mensual, matricula_pagada(0/1), fecha_inicio, fecha_fin, fecha_inscripcion
+inscripciones: inscripcion_id, alumno_id, deporte_id, estado(pendiente/activa/cancelada/suspendida), plan(EconÃ³mico/EstÃ¡ndar/Premium), precio_mensual, matricula_pagada(0/1), fecha_inicio, fecha_fin, fecha_inscripcion
 
-deportes: deporte_id, nombre, matricula(precio de matrícula), estado(activo/inactivo)
+deportes: deporte_id, nombre, matricula(precio de matrÃ­cula), estado(activo/inactivo)
 
 horarios: horario_id, deporte_id, dia(LUNES/MARTES/MIERCOLES/JUEVES/VIERNES/SABADO/DOMINGO), hora_inicio, hora_fin, cupo_maximo, cupos_ocupados, estado(activo/inactivo/suspendido), categoria, nivel, ano_min, ano_max, genero(Masculino/Femenino/Mixto), precio, plan
 
@@ -10922,7 +10926,7 @@ asistencias: asistencia_id, alumno_id, horario_id, fecha, presente(0=ausente/1=p
 
 inscripcion_horarios: id, inscripcion_id, horario_id, estado(activo/inactivo)
 
-pagos_mensuales: pago_id, alumno_id, mes, año, monto, estado(pendiente/confirmado/rechazado)
+pagos_mensuales: pago_id, alumno_id, mes, aÃ±o, monto, estado(pendiente/confirmado/rechazado)
 
 categorias: categoria_id, deporte_id, nombre, ano_min, ano_max, estado(activo/inactivo)`;
 
@@ -10930,7 +10934,7 @@ app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, 
   try {
     const { mensaje } = req.body;
     if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0 || mensaje.length > 600) {
-      return res.status(400).json({ success: false, error: 'Mensaje inválido' });
+      return res.status(400).json({ success: false, error: 'Mensaje invÃ¡lido' });
     }
 
     // Paso 1: Groq genera SQL o respuesta directa
@@ -10953,7 +10957,7 @@ app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, 
 
     if (!groqRes1.ok) {
       const errBody = await groqRes1.text();
-      console.error('❌ Groq API error:', errBody);
+      console.error('âŒ Groq API error:', errBody);
       return res.status(502).json({ success: false, error: 'Error al conectar con el asistente IA' });
     }
 
@@ -10993,12 +10997,12 @@ app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, 
         const [rows] = await db.execute(query);
         resultados = rows;
       } catch (sqlError) {
-        console.error('❌ Chat SQL error:', sqlError.message);
+        console.error('âŒ Chat SQL error:', sqlError.message);
         return res.json({ success: true, respuesta: `No pude ejecutar esa consulta. Intenta reformular la pregunta.` });
       }
 
       if (resultados.length === 0) {
-        return res.json({ success: true, respuesta: 'No encontré registros con esos criterios.' });
+        return res.json({ success: true, respuesta: 'No encontrÃ© registros con esos criterios.' });
       }
 
       // Paso 3: Groq formatea los resultados
@@ -11013,7 +11017,7 @@ app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, 
           messages: [
             {
               role: 'system',
-              content: 'Eres el asistente de JAGUARES academia deportiva. Responde en español de forma clara y concisa. El admin te hizo una pregunta y te doy los datos de la BD. Presenta la info de forma legible: usa listas, resalta números importantes. Sin JSON, solo texto natural.'
+              content: 'Eres el asistente de JAGUARES academia deportiva. Responde en espaÃ±ol de forma clara y concisa. El admin te hizo una pregunta y te doy los datos de la BD. Presenta la info de forma legible: usa listas, resalta nÃºmeros importantes. Sin JSON, solo texto natural.'
             },
             {
               role: 'user',
@@ -11033,23 +11037,23 @@ app.post('/api/admin/chat', verificarAutenticacion, verificarAdmin, async (req, 
 
     res.json({ success: true, respuesta: 'No pude entender esa consulta. Intenta reformularla.' });
   } catch (error) {
-    console.error('❌ Error chatbot admin:', error);
+    console.error('âŒ Error chatbot admin:', error);
     res.status(500).json({ success: false, error: 'Error interno del chatbot' });
   }
 });
 
 // Manejo de errores no capturados
 process.on('uncaughtException', (error) => {
-  console.error('❌ Error no capturado:', error);
+  console.error('âŒ Error no capturado:', error);
   console.error('Stack trace:', error.stack);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Promesa rechazada no manejada:', reason);
+  console.error('âŒ Promesa rechazada no manejada:', reason);
   console.error('Promise:', promise);
 });
 // ==================== ERROR HANDLERS ====================
-// IMPORTANTE: Deben estar DESPUÉS de todas las rutas
+// IMPORTANTE: Deben estar DESPUÃ‰S de todas las rutas
 
 // 404 - Ruta no encontrada
 app.use(notFoundHandler);
