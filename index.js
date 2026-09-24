@@ -141,18 +141,28 @@ async function initDatabase() {
         console.log('\u2705 Columna numero_operacion agregada a pagos_mensuales');
       }
 
-      // Sincronizar comprobantes de alumnos a pagos_mensuales si están vacíos
+      // Limpiar comprobantes asignados erróneamente a pagos pendientes que nunca subieron comprobante
       try {
         await connection.query(
-          'UPDATE pagos_mensuales pm ' +
-          'JOIN alumnos a ON pm.alumno_id = a.alumno_id ' +
-          'SET ' +
-          '  pm.comprobante_url = COALESCE(NULLIF(pm.comprobante_url, ""), a.comprobante_pago_url), ' +
-          '  pm.numero_operacion = COALESCE(NULLIF(pm.numero_operacion, ""), a.numero_operacion) ' +
-          'WHERE (pm.comprobante_url IS NULL OR pm.comprobante_url = "") ' +
-          '  AND a.comprobante_pago_url IS NOT NULL'
+          "UPDATE pagos_mensuales SET comprobante_url = NULL, numero_operacion = NULL WHERE estado = 'pendiente' AND fecha_pago IS NULL AND metodo_pago IS NULL"
         );
-      } catch (errSyncComp) {}
+      } catch (errCleanComp) {}
+
+      // Corregir montos en 0 de pagos mensuales pendientes a partir de inscripciones
+      try {
+        await connection.query(`
+          UPDATE pagos_mensuales pm
+          SET pm.monto = (
+            SELECT COALESCE(SUM(i.precio_mensual), 0)
+            FROM inscripciones i
+            WHERE i.alumno_id = pm.alumno_id AND i.estado IN ('activa', 'pendiente')
+          )
+          WHERE (pm.monto IS NULL OR pm.monto = 0)
+            AND EXISTS (
+              SELECT 1 FROM inscripciones i2 WHERE i2.alumno_id = pm.alumno_id AND i2.estado IN ('activa', 'pendiente')
+            )
+        `);
+      } catch (errMonto) {}
 
       // Sincronizar comprobante y OP más reciente de pagos_mensuales hacia alumnos
       try {
@@ -2581,8 +2591,6 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
     let query =
       'SELECT ' +
       'pm.*, ' +
-      'COALESCE(NULLIF(pm.comprobante_url, ""), a.comprobante_pago_url) as comprobante_url, ' +
-      'COALESCE(NULLIF(pm.numero_operacion, ""), a.numero_operacion) as numero_operacion, ' +
       'a.dni, ' +
       'a.nombres, ' +
       'a.telefono, ' +
@@ -2874,7 +2882,16 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
         const colYear = global.COL_ANIO || 'año';
         const mesNombre = (mes || 'septiembre').toLowerCase();
         const anioNum = parseInt(anio) || new Date().getFullYear();
-        const montoNum = (monto !== undefined && monto !== null) ? parseFloat(monto) : 0;
+        let montoNum = (monto !== undefined && monto !== null) ? parseFloat(monto) : 0;
+        if (!montoNum || montoNum <= 0) {
+          const [montos] = await db.query(
+            `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+            [alumnoId]
+          );
+          if (montos.length > 0 && montos[0].total) {
+            montoNum = parseFloat(montos[0].total);
+          }
+        }
 
         const [nuevoPago] = await db.query(
           `INSERT INTO pagos_mensuales (alumno_id, mes, \`${colYear}\`, monto, estado, observaciones, fecha_pago, created_at)
@@ -2973,9 +2990,24 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
     const { id } = req.params;
     const { observaciones, dni, mes, anio, monto } = req.body;
 
-    const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    const [pago] = await db.query('SELECT pago_id, alumno_id, monto FROM pagos_mensuales WHERE pago_id = ?', [id]);
     if (pago.length > 0) {
-      await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, id]);
+      let updSql = 'UPDATE pagos_mensuales SET observaciones = ?';
+      const updParams = [observaciones || null];
+      // Si el monto de este registro era 0, intentar recuperar el monto real de inscripciones
+      if (!pago[0].monto || parseFloat(pago[0].monto) === 0) {
+        const [montos] = await db.query(
+          `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+          [pago[0].alumno_id]
+        );
+        if (montos.length > 0 && montos[0].total) {
+          updSql += ', monto = ?';
+          updParams.push(parseFloat(montos[0].total));
+        }
+      }
+      updSql += ' WHERE pago_id = ?';
+      updParams.push(id);
+      await db.query(updSql, updParams);
       return res.json({ success: true, mensaje: 'Observación guardada' });
     }
 
@@ -2992,15 +3024,32 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
       const colYear = global.COL_ANIO || 'año';
       const mesNombre = (mes || 'septiembre').toLowerCase();
       const anioNum = parseInt(anio) || new Date().getFullYear();
-      const montoNum = parseFloat(monto) || 0;
+      let montoNum = parseFloat(monto) || 0;
+      if (!montoNum || montoNum <= 0) {
+        const [montos] = await db.query(
+          `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
+          [alumnoId]
+        );
+        if (montos.length > 0 && montos[0].total) {
+          montoNum = parseFloat(montos[0].total);
+        }
+      }
 
       const [existente] = await db.query(
-        `SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND LOWER(mes) = ? AND \`${colYear}\` = ? LIMIT 1`,
+        `SELECT pago_id, monto FROM pagos_mensuales WHERE alumno_id = ? AND LOWER(mes) = ? AND \`${colYear}\` = ? LIMIT 1`,
         [alumnoId, mesNombre, anioNum]
       );
 
       if (existente.length > 0) {
-        await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, existente[0].pago_id]);
+        let updSql = 'UPDATE pagos_mensuales SET observaciones = ?';
+        const updParams = [observaciones || null];
+        if ((!existente[0].monto || parseFloat(existente[0].monto) === 0) && montoNum > 0) {
+          updSql += ', monto = ?';
+          updParams.push(montoNum);
+        }
+        updSql += ' WHERE pago_id = ?';
+        updParams.push(existente[0].pago_id);
+        await db.query(updSql, updParams);
       } else {
         await db.query(
           `INSERT INTO pagos_mensuales (alumno_id, mes, \`${colYear}\`, monto, estado, observaciones, created_at)
