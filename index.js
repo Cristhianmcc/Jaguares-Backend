@@ -144,7 +144,7 @@ async function initDatabase() {
       // Limpiar comprobantes asignados erróneamente a pagos pendientes que nunca subieron comprobante
       try {
         await connection.query(
-          "UPDATE pagos_mensuales SET comprobante_url = NULL, numero_operacion = NULL WHERE estado = 'pendiente' AND fecha_pago IS NULL AND metodo_pago IS NULL"
+          "UPDATE pagos_mensuales SET comprobante_url = NULL, numero_operacion = NULL WHERE estado = 'pendiente' AND fecha_pago IS NULL"
         );
       } catch (errCleanComp) {}
 
@@ -2850,6 +2850,17 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         ultima_fecha: null,
         ultimo_presente: null
       };
+
+      // Si el pago está pendiente y no tiene fecha_pago, NO tiene comprobante de este mes
+      if (p.estado === 'pendiente' && (!p.fecha_pago || p.fecha_pago === '-' || p.fecha_pago === 'null')) {
+        p.comprobante_url = null;
+        p.numero_operacion = null;
+      }
+
+      // Si el monto es 0 o null, calcularlo desde sus deportes inscritos
+      if ((!p.monto || parseFloat(p.monto) === 0) && p.deportes_inscritos.length > 0) {
+        p.monto = p.deportes_inscritos.reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
+      }
     });
 
     res.json({ success: true, pagos });
