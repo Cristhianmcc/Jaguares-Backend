@@ -2858,11 +2858,33 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
 app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { observaciones, monto, deportes_pendientes } = req.body;
+    const { observaciones, monto, deportes_pendientes, dni, mes, anio } = req.body;
 
-    const [pago] = await db.query('SELECT pago_id, alumno_id, mes, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
+    let [pago] = await db.query('SELECT pago_id, alumno_id, mes, estado FROM pagos_mensuales WHERE pago_id = ?', [id]);
     if (pago.length === 0) {
-      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+      let alumnoId = null;
+      if (dni) {
+        const [alumnos] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+        if (alumnos.length > 0) alumnoId = alumnos[0].alumno_id;
+      } else if (parseInt(id) < 0) {
+        alumnoId = Math.floor(Math.abs(parseInt(id)) / 100);
+      }
+
+      if (alumnoId) {
+        const colYear = global.COL_ANIO || 'año';
+        const mesNombre = (mes || 'septiembre').toLowerCase();
+        const anioNum = parseInt(anio) || new Date().getFullYear();
+        const montoNum = (monto !== undefined && monto !== null) ? parseFloat(monto) : 0;
+
+        const [nuevoPago] = await db.query(
+          `INSERT INTO pagos_mensuales (alumno_id, mes, \`${colYear}\`, monto, estado, observaciones, fecha_pago, created_at)
+           VALUES (?, ?, ?, ?, 'confirmado', ?, NOW(), NOW())`,
+          [alumnoId, mesNombre, anioNum, montoNum, observaciones || null]
+        );
+        pago = [{ pago_id: nuevoPago.insertId, alumno_id: alumnoId, mes: mesNombre, estado: 'confirmado' }];
+      } else {
+        return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+      }
     }
 
     let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = COALESCE(fecha_pago, NOW()), observaciones = COALESCE(?, observaciones)`;
@@ -2949,16 +2971,47 @@ app.put('/api/admin/pagos-mensuales/:id/rechazar', verificarAutenticacion, verif
 app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { observaciones } = req.body;
+    const { observaciones, dni, mes, anio, monto } = req.body;
 
     const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
-    if (pago.length === 0) {
-      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    if (pago.length > 0) {
+      await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, id]);
+      return res.json({ success: true, mensaje: 'Observación guardada' });
     }
 
-    await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, id]);
+    // Si es un pago virtual (alumno pendiente sin registro en pagos_mensuales)
+    let alumnoId = null;
+    if (dni) {
+      const [alumnos] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+      if (alumnos.length > 0) alumnoId = alumnos[0].alumno_id;
+    } else if (parseInt(id) < 0) {
+      alumnoId = Math.floor(Math.abs(parseInt(id)) / 100);
+    }
 
-    res.json({ success: true, mensaje: 'Observación guardada' });
+    if (alumnoId) {
+      const colYear = global.COL_ANIO || 'año';
+      const mesNombre = (mes || 'septiembre').toLowerCase();
+      const anioNum = parseInt(anio) || new Date().getFullYear();
+      const montoNum = parseFloat(monto) || 0;
+
+      const [existente] = await db.query(
+        `SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND LOWER(mes) = ? AND \`${colYear}\` = ? LIMIT 1`,
+        [alumnoId, mesNombre, anioNum]
+      );
+
+      if (existente.length > 0) {
+        await db.query('UPDATE pagos_mensuales SET observaciones = ? WHERE pago_id = ?', [observaciones || null, existente[0].pago_id]);
+      } else {
+        await db.query(
+          `INSERT INTO pagos_mensuales (alumno_id, mes, \`${colYear}\`, monto, estado, observaciones, created_at)
+           VALUES (?, ?, ?, ?, 'pendiente', ?, NOW())`,
+          [alumnoId, mesNombre, anioNum, montoNum, observaciones || null]
+        );
+      }
+      return res.json({ success: true, mensaje: 'Observación guardada' });
+    }
+
+    res.status(404).json({ success: false, error: 'Pago no encontrado' });
   } catch (error) {
     console.error('❌ Error al guardar observación:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -2993,20 +3046,50 @@ app.put('/api/admin/pagos-mensuales/:id/comprobante', verificarAutenticacion, ve
 app.put('/api/admin/pagos-mensuales/:id/monto', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { monto } = req.body;
+    const { monto, dni, mes, anio } = req.body;
 
     if (monto === undefined || monto === null || isNaN(parseFloat(monto)) || parseFloat(monto) < 0) {
       return res.status(400).json({ success: false, error: 'Monto inválido' });
     }
 
     const [pago] = await db.query('SELECT pago_id FROM pagos_mensuales WHERE pago_id = ?', [id]);
-    if (pago.length === 0) {
-      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+    if (pago.length > 0) {
+      await db.query('UPDATE pagos_mensuales SET monto = ? WHERE pago_id = ?', [parseFloat(monto), id]);
+      return res.json({ success: true, mensaje: 'Monto actualizado' });
     }
 
-    await db.query('UPDATE pagos_mensuales SET monto = ? WHERE pago_id = ?', [parseFloat(monto), id]);
+    // Si es un pago virtual (alumno pendiente)
+    let alumnoId = null;
+    if (dni) {
+      const [alumnos] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+      if (alumnos.length > 0) alumnoId = alumnos[0].alumno_id;
+    } else if (parseInt(id) < 0) {
+      alumnoId = Math.floor(Math.abs(parseInt(id)) / 100);
+    }
 
-    res.json({ success: true, mensaje: 'Monto actualizado' });
+    if (alumnoId) {
+      const colYear = global.COL_ANIO || 'año';
+      const mesNombre = (mes || 'septiembre').toLowerCase();
+      const anioNum = parseInt(anio) || new Date().getFullYear();
+
+      const [existente] = await db.query(
+        `SELECT pago_id FROM pagos_mensuales WHERE alumno_id = ? AND LOWER(mes) = ? AND \`${colYear}\` = ? LIMIT 1`,
+        [alumnoId, mesNombre, anioNum]
+      );
+
+      if (existente.length > 0) {
+        await db.query('UPDATE pagos_mensuales SET monto = ? WHERE pago_id = ?', [parseFloat(monto), existente[0].pago_id]);
+      } else {
+        await db.query(
+          `INSERT INTO pagos_mensuales (alumno_id, mes, \`${colYear}\`, monto, estado, created_at)
+           VALUES (?, ?, ?, ?, 'pendiente', NOW())`,
+          [alumnoId, mesNombre, anioNum, parseFloat(monto)]
+        );
+      }
+      return res.json({ success: true, mensaje: 'Monto actualizado' });
+    }
+
+    res.status(404).json({ success: false, error: 'Pago no encontrado' });
   } catch (error) {
     console.error('❌ Error al actualizar monto:', error);
     res.status(500).json({ success: false, error: error.message });
