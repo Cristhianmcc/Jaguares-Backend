@@ -153,6 +153,43 @@ async function initDatabase() {
           '  AND a.comprobante_pago_url IS NOT NULL'
         );
       } catch (errSyncComp) {}
+
+      // Sincronizar comprobante y OP más reciente de pagos_mensuales hacia alumnos
+      try {
+        await connection.query(`
+          UPDATE alumnos a
+          JOIN (
+            SELECT pm1.alumno_id, pm1.comprobante_url, pm1.numero_operacion
+            FROM pagos_mensuales pm1
+            INNER JOIN (
+              SELECT alumno_id, MAX(pago_id) as max_pago_id
+              FROM pagos_mensuales
+              WHERE comprobante_url IS NOT NULL AND comprobante_url != ''
+              GROUP BY alumno_id
+            ) pm2 ON pm1.pago_id = pm2.max_pago_id
+          ) ult_pm ON a.alumno_id = ult_pm.alumno_id
+          SET 
+            a.comprobante_pago_url = COALESCE(NULLIF(ult_pm.comprobante_url, ""), a.comprobante_pago_url),
+            a.numero_operacion = COALESCE(NULLIF(a.numero_operacion, ""), ult_pm.numero_operacion)
+        `);
+      } catch (errSyncRev) {}
+
+      // Asignar OP de comprobante de Gabriel Logan (74980761) si estaba vacío
+      try {
+        await connection.query(`
+          UPDATE pagos_mensuales pm
+          JOIN alumnos a ON pm.alumno_id = a.alumno_id
+          SET pm.numero_operacion = '74980761'
+          WHERE a.dni = '81627904' 
+            AND LOWER(pm.mes) IN ('septiembre', 'setiembre')
+            AND (pm.numero_operacion IS NULL OR pm.numero_operacion = '')
+        `);
+        await connection.query(`
+          UPDATE alumnos
+          SET numero_operacion = '74980761'
+          WHERE dni = '81627904' AND (numero_operacion IS NULL OR numero_operacion = '')
+        `);
+      } catch (errOpGabriel) {}
       // Migrar unique key para permitir pagos parciales (split por deporte)
       try {
         const [indexes] = await connection.query('SHOW INDEX FROM pagos_mensuales WHERE Key_name = "unique_alumno_mes"');
@@ -2404,6 +2441,22 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
     
     if (pagoExistente.length > 0) {
       console.log(`⚠️ Pago mensual duplicado detectado - DNI: ${dni}, Mes: ${mes}. Ya existe comprobante.`);
+      if (numero_operacion && String(numero_operacion).trim()) {
+        try {
+          const numOpLimpio = String(numero_operacion).trim();
+          await db.query(
+            'UPDATE pagos_mensuales SET numero_operacion = ? WHERE pago_id = ?',
+            [numOpLimpio, pagoExistente[0].pago_id]
+          );
+          await db.query(
+            'UPDATE alumnos SET numero_operacion = ? WHERE alumno_id = ?',
+            [numOpLimpio, alumnoDb.alumno_id]
+          );
+          console.log(`✅ Número de operación actualizado a ${numOpLimpio} para alumno ${alumnoDb.alumno_id}`);
+        } catch (errUpdOp) {
+          console.warn('⚠️ No se pudo actualizar numero_operacion en duplicado:', errUpdOp.message);
+        }
+      }
       return res.json({
         success: true,
         message: 'Ya tienes un comprobante registrado para este mes. No es necesario enviarlo de nuevo.',
@@ -2474,6 +2527,16 @@ app.post(['/api/pago-mensual', '/api/pago-Mensual'], async (req, res) => {
         [alumnoDb.alumno_id, mesNombre, anioActual, monto || 0, urlComprobante, (numero_operacion || '').trim() || null]
       );
     }
+    // Sincronizar también a tabla alumnos con comprobante y OP más reciente
+    try {
+      await db.query(
+        'UPDATE alumnos SET comprobante_pago_url = ?, numero_operacion = COALESCE(?, numero_operacion), updated_at = NOW() WHERE alumno_id = ?',
+        [urlComprobante, (numero_operacion || '').trim() || null, alumnoDb.alumno_id]
+      );
+    } catch (errUpdAlumno) {
+      console.warn('⚠️ No se pudo sincronizar comprobante a tabla alumnos:', errUpdAlumno.message);
+    }
+
     console.log('✅ Pago mensual registrado en MySQL');
     
     // Invalidar caché
@@ -2815,6 +2878,19 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
     updateParams.push(id);
 
     await db.query(updateQuery, updateParams);
+
+    // Sincronizar comprobante y OP de pagos_mensuales a alumnos
+    try {
+      const [pagoFull] = await db.query('SELECT alumno_id, comprobante_url, numero_operacion FROM pagos_mensuales WHERE pago_id = ?', [id]);
+      if (pagoFull.length > 0 && pagoFull[0].alumno_id) {
+        await db.query(
+          'UPDATE alumnos SET comprobante_pago_url = COALESCE(NULLIF(?, ""), comprobante_pago_url), numero_operacion = COALESCE(NULLIF(?, ""), numero_operacion), updated_at = NOW() WHERE alumno_id = ?',
+          [pagoFull[0].comprobante_url || null, pagoFull[0].numero_operacion || null, pagoFull[0].alumno_id]
+        );
+      }
+    } catch (eSyncAlum) {
+      console.warn('⚠️ Error al sincronizar pago confirmado con alumno:', eSyncAlum.message);
+    }
 
     // Si hay deportes pendientes, crear pago pendiente separado para ellos
     if (deportes_pendientes && deportes_pendientes.length > 0) {
@@ -10055,8 +10131,14 @@ app.get('/api/admin/inscripciones', async (req, res) => {
         a.estado_pago,
         a.fecha_pago,
         a.monto_pago,
-        a.numero_operacion,
-        a.comprobante_pago_url as url_comprobante,
+        COALESCE(
+          (SELECT pm.numero_operacion FROM pagos_mensuales pm WHERE pm.alumno_id = a.alumno_id AND pm.numero_operacion IS NOT NULL AND pm.numero_operacion != '' ORDER BY pm.pago_id DESC LIMIT 1),
+          a.numero_operacion
+        ) as numero_operacion,
+        COALESCE(
+          (SELECT pm.comprobante_url FROM pagos_mensuales pm WHERE pm.alumno_id = a.alumno_id AND pm.comprobante_url IS NOT NULL AND pm.comprobante_url != '' ORDER BY pm.pago_id DESC LIMIT 1),
+          a.comprobante_pago_url
+        ) as url_comprobante,
         a.dni_frontal_url,
         a.dni_reverso_url,
         a.foto_carnet_url,
