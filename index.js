@@ -4909,7 +4909,7 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
 
         const [detalle] = await db.query(`
             SELECT
-                ast.fecha,
+                DATE_FORMAT(ast.fecha, '%Y-%m-%d') AS fecha,
                 d.nombre AS deporte,
                 h.categoria,
                 h.dia,
@@ -4952,7 +4952,7 @@ app.get('/api/admin/exportar-asistencias-json', verificarAutenticacion, verifica
 
         const [rows] = await db.query(`
             SELECT
-                ast.fecha,
+                DATE_FORMAT(ast.fecha, '%Y-%m-%d') AS fecha,
                 d.nombre AS deporte,
                 h.categoria,
                 h.dia,
