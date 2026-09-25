@@ -3589,7 +3589,7 @@ app.get('/api/admin/inscritos', verificarAutenticacion, verificarAdmin, rateLimi
         }
         
         query += ` GROUP BY i.inscripcion_id, a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno, a.fecha_nacimiento, a.sexo, a.telefono, a.email, a.direccion, a.apoderado, a.telefono_apoderado, a.seguro_tipo, a.condicion_medica, a.estado, a.estado_pago, a.monto_pago, a.numero_operacion, a.fecha_pago, a.dni_frontal_url, a.dni_reverso_url, a.foto_carnet_url, a.comprobante_pago_url, a.created_at, d.nombre, i.estado`;
-        query += ` ORDER BY a.created_at DESC`;
+        query += ` ORDER BY (i.estado = 'pendiente') DESC, COALESCE(i.created_at, a.created_at) DESC`;
         
         const [alumnos] = params.length > 0 
           ? await db.execute(query, params)
@@ -10317,7 +10317,7 @@ app.get('/api/admin/inscripciones', async (req, res) => {
       params.push(searchPattern, searchPattern, searchPattern);
     }
     
-    query += ' GROUP BY a.alumno_id ORDER BY a.created_at DESC';
+    query += ' GROUP BY a.alumno_id ORDER BY inscripciones_pendientes DESC, COALESCE(MAX(i.created_at), a.created_at) DESC';
     
     // Paginación
     const offset = (parseInt(pagina) - 1) * parseInt(limite);
