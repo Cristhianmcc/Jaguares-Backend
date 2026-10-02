@@ -9295,34 +9295,82 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     const metodoClaseStr = (metodo_pago_clase || 'Efectivo').trim();
     const obsPagoClase = `Pago por clase: S/ ${montoClaseNum.toFixed(2)} (${metodoClaseStr})`;
 
-    if (!dni) {
-      return res.status(400).json({ success: false, error: 'DNI requerido' });
+    let termino = (dni || req.body.busqueda || '').trim();
+
+    if (!termino) {
+      return res.status(400).json({ success: false, error: 'DNI, nombre o apellido requerido' });
     }
 
-    // Normalizar DNI
-    if (dni.includes('dni=')) {
-      const match = dni.match(/dni=([a-zA-Z0-9_-]+)/);
-      if (match) dni = match[1];
-    } else if (dni.includes('/')) {
-      const parts = dni.split('/');
-      dni = parts[parts.length - 1];
+    // Normalizar si viene de URL o QR
+    if (termino.includes('dni=')) {
+      const match = termino.match(/dni=([a-zA-Z0-9_-]+)/);
+      if (match) termino = match[1];
+    } else if (termino.includes('/')) {
+      const parts = termino.split('/');
+      termino = parts[parts.length - 1];
     }
-    dni = dni.replace(/[^0-9a-zA-Z]/g, '').trim();
 
-    // 1. Buscar alumno en MySQL
-    const [alumnosRows] = await db.query(`
-      SELECT 
-        a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
-        a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado, a.created_at
-      FROM alumnos a
-      WHERE a.dni = ?
-      LIMIT 1
-    `, [dni]);
+    const esNumeroPuro = /^\d+$/.test(termino);
+    let alumnosRows = [];
+
+    if (esNumeroPuro && termino.length >= 6) {
+      // 1. Búsqueda directa por DNI exacto
+      const [rows] = await db.query(`
+        SELECT 
+          a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
+          a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado, a.created_at
+        FROM alumnos a
+        WHERE a.dni = ?
+        LIMIT 1
+      `, [termino]);
+      alumnosRows = rows;
+    }
+
+    if (alumnosRows.length === 0) {
+      // 2. Buscar por nombre, apellidos o coincidencia de DNI
+      const terminoLike = `%${termino}%`;
+      const [rows] = await db.query(`
+        SELECT 
+          a.alumno_id, a.dni, a.nombres, a.apellido_paterno, a.apellido_materno,
+          a.fecha_nacimiento, a.estado_pago, a.foto_carnet_url, a.estado, a.created_at
+        FROM alumnos a
+        WHERE a.dni = ?
+           OR CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', COALESCE(a.apellido_materno, '')) LIKE ?
+           OR CONCAT(a.apellido_paterno, ' ', COALESCE(a.apellido_materno, ''), ' ', a.nombres) LIKE ?
+           OR a.nombres LIKE ?
+           OR a.apellido_paterno LIKE ?
+           OR a.apellido_materno LIKE ?
+        ORDER BY 
+          CASE WHEN a.dni = ? THEN 1
+               WHEN CONCAT(a.nombres, ' ', a.apellido_paterno) LIKE ? THEN 2
+               ELSE 3 END,
+          a.nombres ASC
+        LIMIT 10
+      `, [termino, terminoLike, terminoLike, terminoLike, terminoLike, terminoLike, termino, `${termino}%`]);
+      alumnosRows = rows;
+    }
 
     if (alumnosRows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Alumno no encontrado en el sistema con el DNI: ' + dni
+        error: `Alumno no encontrado en el sistema con "${termino}"`
+      });
+    }
+
+    // Si hay más de un resultado y fue búsqueda por texto
+    if (alumnosRows.length > 1 && !esNumeroPuro) {
+      return res.json({
+        success: false,
+        coincidencias_multiples: true,
+        mensaje: `Se encontraron ${alumnosRows.length} alumnos con "${termino}". Seleccione el correcto:`,
+        candidatos: alumnosRows.map(a => ({
+          alumno_id: a.alumno_id,
+          dni: a.dni,
+          nombres: a.nombres,
+          apellidos: `${a.apellido_paterno || ''} ${a.apellido_materno || ''}`.trim(),
+          nombreCompleto: `${a.nombres || ''} ${a.apellido_paterno || ''} ${a.apellido_materno || ''}`.trim(),
+          foto_carnet_url: a.foto_carnet_url
+        }))
       });
     }
 
