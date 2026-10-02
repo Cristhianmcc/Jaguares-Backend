@@ -4319,31 +4319,25 @@ app.post('/api/activar-inscripciones/:dni', async (req, res) => {
 // Ranking público para mostrar en la página principal
 app.get('/api/public/ranking', async (req, res) => {
     try {
-        const mesActual = new Date().getMonth() + 1;
-        const anioActual = new Date().getFullYear();
+        let mesActual = parseInt(req.query.mes) || (new Date().getMonth() + 1);
+        let anioActual = parseInt(req.query.anio) || (new Date().getFullYear());
         
-        // Función auxiliar para convertir URLs de Google Drive a formato de imagen directa
+        // Función auxiliar para convertir URLs de fotos (locales y Google Drive) a formato de imagen directa
         function convertirUrlDrive(url) {
             if (!url) return null;
-            
-            // Si ya es una URL de imagen directa, retornarla
+            if (url.startsWith('/uploads/')) return url;
             if (url.includes('uc?export=view') || url.includes('lh3.googleusercontent.com')) {
                 return url;
             }
-            
-            // Extraer el ID del archivo de Google Drive
-            // Formato: https://drive.google.com/file/d/ID/view?...
-            const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
             if (match && match[1]) {
-                // Usar el formato de thumbnail de Google que es más confiable
                 return `https://lh3.googleusercontent.com/d/${match[1]}`;
             }
-            
             return url;
         }
         
-        // Obtener el ranking del mes actual con datos de alumnos
-        const [ranking] = await db.query(`
+        // Obtener el ranking con datos de alumnos y su foto de carnet
+        let [ranking] = await db.query(`
             SELECT 
                 rp.alumno_id,
                 CONCAT(a.nombres, ' ', a.apellido_paterno) as nombre_completo,
@@ -4362,12 +4356,42 @@ app.get('/api/public/ranking', async (req, res) => {
             LIMIT 10
         `, [mesActual, anioActual]);
         
-        // Si no hay datos del mes actual, devolver array vacío
+        // Si no hay datos del mes actual, buscar automáticamente el periodo más reciente con puntajes
+        if (!ranking || ranking.length === 0) {
+            const [ultimoPeriodo] = await db.query(`
+                SELECT mes, anio FROM ranking_puntos 
+                ORDER BY anio DESC, mes DESC 
+                LIMIT 1
+            `);
+            if (ultimoPeriodo.length > 0) {
+                mesActual = ultimoPeriodo[0].mes;
+                anioActual = ultimoPeriodo[0].anio;
+                [ranking] = await db.query(`
+                    SELECT 
+                        rp.alumno_id,
+                        CONCAT(a.nombres, ' ', a.apellido_paterno) as nombre_completo,
+                        CONCAT(SUBSTRING_INDEX(a.nombres, ' ', 1), ' ', LEFT(a.apellido_paterno, 1), '.') as nombre_corto,
+                        a.foto_carnet_url as foto_url,
+                        d.nombre as deporte,
+                        rp.puntos_total,
+                        rp.puntos_asistencia,
+                        rp.puntos_bonus,
+                        rp.categoria
+                    FROM ranking_puntos rp
+                    JOIN alumnos a ON rp.alumno_id = a.alumno_id
+                    JOIN deportes d ON rp.deporte_id = d.deporte_id
+                    WHERE rp.mes = ? AND rp.anio = ?
+                    ORDER BY rp.puntos_total DESC
+                    LIMIT 10
+                `, [mesActual, anioActual]);
+            }
+        }
+        
         if (!ranking || ranking.length === 0) {
             return res.json({
                 success: true,
                 ranking: [],
-                mensaje: 'No hay datos de ranking para este mes'
+                mensaje: 'No hay datos de ranking disponibles'
             });
         }
         
