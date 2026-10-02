@@ -9817,10 +9817,10 @@ app.put('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, async
   try {
     if (!db) throw new Error('Base de datos no disponible');
     const { dni } = req.params;
-    const { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo } = req.body;
+    const { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo, email } = req.body;
 
     // Campos editables con sus columnas en BD
-    const camposMap = { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo };
+    const camposMap = { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo, email };
     const hayAlgo = Object.values(camposMap).some(v => v !== undefined);
     if (!hayAlgo) {
       return res.status(400).json({ success: false, error: 'Debes enviar al menos un campo para actualizar' });
