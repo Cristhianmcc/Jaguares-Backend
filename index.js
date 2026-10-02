@@ -2798,7 +2798,7 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         SELECT i.inscripcion_id, i.alumno_id, d.nombre as deporte, i.precio_mensual, i.estado as estado_inscripcion
         FROM inscripciones i
         JOIN deportes d ON i.deporte_id = d.deporte_id
-        WHERE i.alumno_id IN (${phAlumnos})
+        WHERE i.alumno_id IN (${phAlumnos}) AND i.estado IN ('activa', 'pendiente')
         ORDER BY d.nombre
       `, alumnoIds);
       inscDeportes.forEach(row => {
