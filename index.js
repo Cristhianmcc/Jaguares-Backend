@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import fs from 'fs';
@@ -9811,6 +9811,46 @@ app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificar
   }
 });
 
+
+// PUT /api/admin/alumnos/:dni - edita datos basicos del alumno (nombre, apellidos)
+app.put('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    if (!db) throw new Error('Base de datos no disponible');
+    const { dni } = req.params;
+    const { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo, email } = req.body;
+
+    // Campos editables con sus columnas en BD
+    const camposMap = { nombres, apellido_paterno, apellido_materno, telefono, direccion, apoderado, telefono_apoderado, condicion_medica, seguro_tipo, email };
+    const hayAlgo = Object.values(camposMap).some(v => v !== undefined);
+    if (!hayAlgo) {
+      return res.status(400).json({ success: false, error: 'Debes enviar al menos un campo para actualizar' });
+    }
+    const campos = [];
+    const valores = [];
+    for (const [col, val] of Object.entries(camposMap)) {
+      if (val !== undefined) { campos.push(col + ' = ?'); valores.push(typeof val === 'string' ? val.trim() : val); }
+    }
+    valores.push(dni);
+
+    const [result] = await db.execute(
+      `UPDATE alumnos SET ${campos.join(', ')} WHERE dni = ?`,
+      valores
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+
+    // Limpiar cache para que los cambios se vean inmediatamente
+    cache.flushAll();
+    console.log(`Datos del alumno DNI ${dni} actualizados por admin`);
+
+    res.json({ success: true, message: 'Datos del alumno actualizados correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar alumno:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 // DELETE /api/admin/alumnos/:dni — elimina inscripciones + alumno completamente
 app.delete('/api/admin/alumnos/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
   try {
