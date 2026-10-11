@@ -5071,19 +5071,28 @@ app.get('/api/profesor/dias-categoria', verificarAutenticacion, async (req, res)
 });
 
 // GET /api/profesor/horarios-categoria?deporte_id=X&categoria=Y&dia=Z
-// Devuelve los horarios del profesor para deporte/categoría/día
+// Devuelve los horarios del profesor para deporte/categoría (y día opcional)
 app.get('/api/profesor/horarios-categoria', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
         const { deporte_id, categoria, dia } = req.query;
 
-        const [rows] = await db.query(`
+        let query = `
             SELECT h.horario_id, h.hora_inicio, h.hora_fin, h.dia, h.cupo_maximo
             FROM profesor_deportes pd
             JOIN horarios h ON h.horario_id = pd.horario_id
-            WHERE pd.admin_id = ? AND pd.deporte_id = ? AND pd.categoria = ? AND h.dia = ?
-            ORDER BY h.hora_inicio
-        `, [adminId, deporte_id, categoria, dia]);
+            WHERE pd.admin_id = ? AND pd.deporte_id = ? AND pd.categoria = ?
+        `;
+        const params = [adminId, deporte_id, categoria];
+
+        if (dia) {
+            query += ' AND h.dia = ?';
+            params.push(dia);
+        }
+
+        query += " ORDER BY FIELD(h.dia, 'LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO','DOMINGO'), h.hora_inicio";
+
+        const [rows] = await db.query(query, params);
 
         res.json({ success: true, horarios: rows });
     } catch (error) {
@@ -5415,20 +5424,20 @@ app.post('/api/profesor/asignar-puntaje', verificarAutenticacion, async (req, re
     }
 });
 
-// GET /api/profesor/ranking?deporte_id=X&categoria=Y
-// Devuelve el ranking de alumnos para el deporte/categoría del profesor
+// GET /api/profesor/ranking?deporte_id=X&categoria=Y&horario_id=Z
+// Devuelve el ranking de alumnos para el deporte/categoría/horario del profesor
 app.get('/api/profesor/ranking', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
-        const { deporte_id, categoria } = req.query;
+        const { deporte_id, categoria, horario_id } = req.query;
 
-        // Verificar que el profesor tiene asignado ese deporte/categoría
+        // Verificar que el profesor tiene asignado ese deporte/categoría (y horario si viene)
         const [check] = await db.query(
-            'SELECT id FROM profesor_deportes WHERE admin_id = ? AND deporte_id = ? AND (? IS NULL OR categoria = ?)',
-            [adminId, deporte_id, categoria || null, categoria || null]
+            'SELECT id FROM profesor_deportes WHERE admin_id = ? AND deporte_id = ? AND (? IS NULL OR categoria = ?) AND (? IS NULL OR horario_id = ?)',
+            [adminId, deporte_id, categoria || null, categoria || null, horario_id || null, horario_id || null]
         );
         if (check.length === 0) {
-            return res.status(403).json({ success: false, error: 'No autorizado para este deporte/categoría' });
+            return res.status(403).json({ success: false, error: 'No autorizado para este deporte/categoría o turno' });
         }
 
         const mes = req.query.mes ? parseInt(req.query.mes) : new Date().getMonth() + 1;
@@ -5449,15 +5458,21 @@ app.get('/api/profesor/ranking', verificarAutenticacion, async (req, res) => {
             JOIN inscripciones i ON i.alumno_id = a.alumno_id
             JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
             JOIN horarios h ON h.horario_id = ih.horario_id
+            JOIN profesor_deportes pd ON pd.horario_id = h.horario_id AND pd.admin_id = ?
             LEFT JOIN ranking_puntos rp ON rp.alumno_id = a.alumno_id
                 AND rp.deporte_id = h.deporte_id AND rp.mes = ? AND rp.anio = ?
-            WHERE h.deporte_id = ?
+            WHERE h.deporte_id = ? AND i.estado = 'activa'
         `;
-        const params = [mes, anio, deporte_id];
+        const params = [adminId, mes, anio, deporte_id];
 
         if (categoria) {
             rankingQuery += ' AND h.categoria = ?';
             params.push(categoria);
+        }
+
+        if (horario_id) {
+            rankingQuery += ' AND h.horario_id = ?';
+            params.push(horario_id);
         }
 
         rankingQuery += ' GROUP BY a.alumno_id, a.nombres, a.apellido_paterno, a.apellido_materno, a.foto_carnet_url, rp.puntos_asistencia, rp.puntos_bonus, rp.puntos_total ORDER BY puntos_total DESC LIMIT 50';
@@ -5518,11 +5533,11 @@ app.post('/api/profesor/ranking/bonus', verificarAutenticacion, async (req, res)
     }
 });
 
-// POST /api/profesor/ranking/calcular-asistencias  { deporte_id, categoria, mes, anio }
+// POST /api/profesor/ranking/calcular-asistencias  { deporte_id, categoria, horario_id, mes, anio }
 app.post('/api/profesor/ranking/calcular-asistencias', verificarAutenticacion, async (req, res) => {
     try {
         const adminId = req.admin.admin_id;
-        const { deporte_id, categoria, mes, anio } = req.body;
+        const { deporte_id, categoria, horario_id, mes, anio } = req.body;
 
         if (!deporte_id) {
             return res.status(400).json({ success: false, error: 'Falta deporte_id' });
@@ -5531,7 +5546,7 @@ app.post('/api/profesor/ranking/calcular-asistencias', verificarAutenticacion, a
         const mesUso = mes || new Date().getMonth() + 1;
         const anioUso = anio || new Date().getFullYear();
 
-        // Calcular asistencias del mes para cada alumno del horario
+        // Calcular asistencias del mes para cada alumno de los horarios del profesor
         let query = `
             SELECT
                 a.alumno_id,
@@ -5541,17 +5556,23 @@ app.post('/api/profesor/ranking/calcular-asistencias', verificarAutenticacion, a
             FROM inscripciones i
             JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
             JOIN horarios h ON h.horario_id = ih.horario_id
+            JOIN profesor_deportes pd ON pd.horario_id = h.horario_id AND pd.admin_id = ?
             JOIN alumnos a ON a.alumno_id = i.alumno_id
             LEFT JOIN asistencias ast ON ast.alumno_id = a.alumno_id
                 AND ast.horario_id = ih.horario_id
                 AND MONTH(ast.fecha) = ? AND YEAR(ast.fecha) = ?
-            WHERE h.deporte_id = ?
+            WHERE h.deporte_id = ? AND i.estado = 'activa'
         `;
-        const params = [mesUso, anioUso, deporte_id];
+        const params = [adminId, mesUso, anioUso, deporte_id];
 
         if (categoria) {
             query += ' AND h.categoria = ?';
             params.push(categoria);
+        }
+
+        if (horario_id) {
+            query += ' AND h.horario_id = ?';
+            params.push(horario_id);
         }
 
         query += ' GROUP BY a.alumno_id, h.deporte_id, h.categoria';
