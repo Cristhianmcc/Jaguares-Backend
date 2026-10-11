@@ -99,6 +99,9 @@ async function initDatabase() {
       }
 
       // 2. Sincronizar alumnos inscritos en septiembre con pago confirmado que no tengan fila en pagos_mensuales
+      // NOTA: Se deja comentado (desactivado) para evitar que inserte filas indebidas de septiembre a alumnos inscritos en octubre en adelante.
+      // Los alumnos originales de septiembre ya se encuentran sincronizados en la base de datos.
+      /*
       try {
         const colYear = global.COL_ANIO || 'a\u00f1o';
         const [resSync] = await connection.query(
@@ -115,6 +118,7 @@ async function initDatabase() {
           'JOIN inscripciones i ON i.alumno_id = a.alumno_id AND i.estado = "activa" ' +
           'WHERE a.estado_pago = "confirmado" ' +
           '  AND a.created_at >= "2026-09-01 00:00:00" ' +
+          '  AND a.created_at < "2026-10-01 00:00:00" ' + // En caso de reactivación, debe llevar este límite superior
           '  AND NOT EXISTS ( ' +
           '    SELECT 1 FROM pagos_mensuales pm ' +
           '    WHERE pm.alumno_id = a.alumno_id ' +
@@ -129,6 +133,7 @@ async function initDatabase() {
       } catch (errSync) {
         console.warn('⚠️ No se pudo sincronizar inscritos de septiembre a pagos_mensuales:', errSync.message);
       }
+      */
 
       // Agregar columna observaciones si no existe
       const tieneObs = cols.find(c => c.Field === 'observaciones');
@@ -4770,8 +4775,9 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
         const [totales] = await db.query(`
             SELECT
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
-                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta
+                SUM(CASE WHEN ast.presente = 0 AND COALESCE(ast.asistencia_puerta, 0) = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 AND ast.presente = 0 THEN 1 ELSE 0 END) AS total_puerta_pendiente
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             WHERE ast.fecha BETWEEN ? AND ? ${whereCond}
@@ -4786,8 +4792,9 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
                 TIME_FORMAT(h.hora_inicio, '%H:%i') AS hora_inicio,
                 TIME_FORMAT(h.hora_fin, '%H:%i') AS hora_fin,
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.presente = 0 AND COALESCE(ast.asistencia_puerta, 0) = 0 THEN 1 ELSE 0 END) AS total_ausentes,
                 SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 AND ast.presente = 0 THEN 1 ELSE 0 END) AS total_puerta_pendiente,
                 COUNT(*) AS total_registros
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
@@ -4802,7 +4809,8 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
             estadisticas: {
                 total_presentes: Number(totales[0]?.total_presentes || 0),
                 total_ausentes: Number(totales[0]?.total_ausentes || 0),
-                total_puerta: Number(totales[0]?.total_puerta || 0)
+                total_puerta: Number(totales[0]?.total_puerta || 0),
+                total_puerta_pendiente: Number(totales[0]?.total_puerta_pendiente || 0)
             },
             detalle
         });
@@ -4865,12 +4873,16 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
                 DATE_FORMAT(ast.fecha, '%d/%m/%Y') AS fecha,
                 d.nombre AS deporte,
                 h.categoria,
-                h.dia,
+                ELT(WEEKDAY(ast.fecha) + 1, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo') AS dia,
                 TIME_FORMAT(h.hora_inicio, '%H:%i') AS hora_inicio,
                 TIME_FORMAT(h.hora_fin, '%H:%i') AS hora_fin,
                 CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', IFNULL(a.apellido_materno,'')) AS alumno,
                 a.dni,
-                CASE WHEN ast.presente = 1 THEN 'Presente' ELSE 'Ausente' END AS asistencia,
+                CASE 
+                    WHEN ast.presente = 1 THEN 'Presente' 
+                    WHEN ast.asistencia_puerta = 1 THEN 'Ingreso Puerta (Docente pendiente)'
+                    ELSE 'Ausente' 
+                END AS asistencia,
                 CASE WHEN ast.asistencia_puerta = 1 THEN CONCAT('Puerta OK', IF(ast.hora_puerta IS NOT NULL, CONCAT(' (', TIME_FORMAT(ast.hora_puerta, '%H:%i'), ')'), '')) ELSE 'Sin Puerta' END AS puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
@@ -4894,7 +4906,7 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
         for (const r of rows) {
             lines.push([
                 esc(r.fecha),
-                esc(r.deporte),
+                esc(String(r.deporte || '').replace(/FÃºtbol|FÃ°tbol|F\uFFFDtbol/gi, 'Fútbol').replace(/BÃ¡squet/gi, 'Básquet').replace(/VÃ³ley/gi, 'Vóley')),
                 esc(r.categoria),
                 esc(r.dia),
                 esc(r.hora_inicio),
