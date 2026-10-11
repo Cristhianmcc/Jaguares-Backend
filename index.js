@@ -4692,7 +4692,12 @@ app.get('/api/admin/docente-clase-alumnos', verificarAutenticacion, verificarAdm
         let asistencias = [];
         if (fecha_inicio && fecha_fin) {
             const [rows] = await db.query(`
-                SELECT ast.alumno_id, ast.fecha, ast.presente
+                SELECT
+                    ast.alumno_id,
+                    ast.fecha,
+                    ast.presente,
+                    COALESCE(ast.asistencia_puerta, 0) AS asistencia_puerta,
+                    TIME_FORMAT(ast.hora_puerta, '%H:%i') AS hora_puerta
                 FROM asistencias ast
                 WHERE ast.horario_id IN (${placeholders})
                   AND ast.fecha BETWEEN ? AND ?
@@ -4763,7 +4768,8 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
         const [totales] = await db.query(`
             SELECT
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes
+                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             WHERE ast.fecha BETWEEN ? AND ? ${whereCond}
@@ -4779,6 +4785,7 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
                 TIME_FORMAT(h.hora_fin, '%H:%i') AS hora_fin,
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
                 SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta,
                 COUNT(*) AS total_registros
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
@@ -4792,7 +4799,8 @@ app.get('/api/admin/reporte-asistencias', verificarAutenticacion, verificarAdmin
             success: true,
             estadisticas: {
                 total_presentes: Number(totales[0]?.total_presentes || 0),
-                total_ausentes: Number(totales[0]?.total_ausentes || 0)
+                total_ausentes: Number(totales[0]?.total_ausentes || 0),
+                total_puerta: Number(totales[0]?.total_puerta || 0)
             },
             detalle
         });
@@ -4822,7 +4830,9 @@ app.get('/api/admin/exportar-asistencias-json', verificarAutenticacion, verifica
                 TIME_FORMAT(h.hora_fin, '%H:%i') AS hora_fin,
                 CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', IFNULL(a.apellido_materno,'')) AS alumno,
                 a.dni,
-                ast.presente
+                ast.presente,
+                COALESCE(ast.asistencia_puerta, 0) AS asistencia_puerta,
+                TIME_FORMAT(ast.hora_puerta, '%H:%i') AS hora_puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             JOIN deportes d ON d.deporte_id = h.deporte_id
@@ -4858,7 +4868,8 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
                 TIME_FORMAT(h.hora_fin, '%H:%i') AS hora_fin,
                 CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', IFNULL(a.apellido_materno,'')) AS alumno,
                 a.dni,
-                CASE WHEN ast.presente = 1 THEN 'Presente' ELSE 'Ausente' END AS asistencia
+                CASE WHEN ast.presente = 1 THEN 'Presente' ELSE 'Ausente' END AS asistencia,
+                CASE WHEN ast.asistencia_puerta = 1 THEN CONCAT('Puerta OK', IF(ast.hora_puerta IS NOT NULL, CONCAT(' (', TIME_FORMAT(ast.hora_puerta, '%H:%i'), ')'), '')) ELSE 'Sin Puerta' END AS puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             JOIN deportes d ON d.deporte_id = h.deporte_id
@@ -4875,7 +4886,7 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
         };
 
         const SEP = ';';
-        const headers = ['Fecha', 'Deporte', 'Categoría', 'Día', 'Hora Inicio', 'Hora Fin', 'Alumno', 'DNI', 'Asistencia'];
+        const headers = ['Fecha', 'Deporte', 'Categoría', 'Día', 'Hora Inicio', 'Hora Fin', 'Alumno', 'DNI', 'Asistencia Docente', 'Puerta (Lector QR)'];
         const lines = [headers.join(SEP)];
 
         for (const r of rows) {
@@ -4888,7 +4899,8 @@ app.get('/api/admin/exportar-asistencias-excel', verificarAutenticacion, verific
                 esc(r.hora_fin),
                 esc(r.alumno),
                 esc(r.dni),
-                esc(r.asistencia)
+                esc(r.asistencia),
+                esc(r.puerta)
             ].join(SEP));
         }
 
@@ -5566,7 +5578,8 @@ app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req,
         const [totales] = await db.query(`
             SELECT
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes
+                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             JOIN profesor_deportes pd ON pd.horario_id = h.horario_id AND pd.admin_id = ?
@@ -5579,7 +5592,8 @@ app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req,
             SELECT
                 ast.fecha,
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS ausentes
+                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS puerta
             FROM asistencias ast
             JOIN horarios h ON h.horario_id = ast.horario_id
             JOIN profesor_deportes pd ON pd.horario_id = h.horario_id AND pd.admin_id = ?
@@ -5594,7 +5608,8 @@ app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req,
             SELECT
                 CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', a.apellido_materno) AS nombre_completo,
                 SUM(CASE WHEN ast.presente = 1 THEN 1 ELSE 0 END) AS total_presentes,
-                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes
+                SUM(CASE WHEN ast.presente = 0 THEN 1 ELSE 0 END) AS total_ausentes,
+                SUM(CASE WHEN ast.asistencia_puerta = 1 THEN 1 ELSE 0 END) AS total_puerta
             FROM asistencias ast
             JOIN alumnos a ON a.alumno_id = ast.alumno_id
             JOIN horarios h ON h.horario_id = ast.horario_id
@@ -5608,15 +5623,18 @@ app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req,
         const estadisticas = {
             total_presentes: Number(totales[0]?.total_presentes || 0),
             total_ausentes: Number(totales[0]?.total_ausentes || 0),
+            total_puerta: Number(totales[0]?.total_puerta || 0),
             por_fecha: porFecha.map(r => ({
                 fecha: r.fecha,
                 presentes: Number(r.presentes),
-                ausentes: Number(r.ausentes)
+                ausentes: Number(r.ausentes),
+                puerta: Number(r.puerta || 0)
             })),
             por_alumno: porAlumno.map(r => ({
                 nombre_completo: r.nombre_completo,
                 total_presentes: Number(r.total_presentes),
-                total_ausentes: Number(r.total_ausentes)
+                total_ausentes: Number(r.total_ausentes),
+                total_puerta: Number(r.total_puerta || 0)
             }))
         };
 
