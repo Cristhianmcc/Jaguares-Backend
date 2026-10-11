@@ -2916,7 +2916,7 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
       }
     }
 
-    let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = COALESCE(fecha_pago, NOW()), observaciones = COALESCE(?, observaciones)`;
+    let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = NOW(), observaciones = COALESCE(?, observaciones)`;
     const updateParams = [observaciones || null];
     
     // Si se envía un monto ajustado, actualizar también
@@ -3879,9 +3879,10 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
         i.precio_mensual, 
         i.matricula_pagada, 
         COALESCE(d.matricula, 20.00) as matricula_deporte, 
-        DATE_FORMAT(COALESCE(i.fecha_inicio, i.fecha_inscripcion), '%Y-%m-%d') as fecha_dia 
+        DATE_FORMAT(COALESCE(a.fecha_pago, i.fecha_inicio, i.fecha_inscripcion), '%Y-%m-%d') as fecha_dia 
       FROM inscripciones i 
       LEFT JOIN deportes d ON i.deporte_id = d.deporte_id
+      LEFT JOIN alumnos a ON i.alumno_id = a.alumno_id
     `);
 
     const [alumnos] = await db.query(`
@@ -3898,7 +3899,8 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
       FROM alumnos
     `);
 
-    const hoy = new Date().toISOString().slice(0, 10);
+    // Fecha actual en hora de Lima (Perú, UTC-5) en formato YYYY-MM-DD
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
     const reporte = calcularReporteFinanciero({
       pagos,
       inscripciones,
@@ -10388,6 +10390,8 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
         i.fecha_inscripcion,
         i.plan,
         i.precio_mensual as precio,
+        i.matricula_pagada,
+        COALESCE(d.matricula, 20.00) as matricula_monto,
         d.deporte_id,
         d.nombre as deporte,
         d.icono,
@@ -10416,6 +10420,8 @@ app.get('/api/admin/inscripciones/:dni', async (req, res) => {
           fecha_inscripcion: row.fecha_inscripcion,
           plan: row.plan,
           precio: row.precio,
+          matricula_pagada: row.matricula_pagada,
+          matricula_monto: parseFloat(row.matricula_monto || 20.00),
           deporte_id: row.deporte_id,
           deporte: row.deporte,
           icono: row.icono,
@@ -10574,7 +10580,25 @@ app.put('/api/admin/inscripciones/:dni/confirmar-pago', async (req, res) => {
 
       // Usar el monto real pagado por el alumno si fue especificado por el administrador
       let montoParaMensualidad = montoMensual;
-      if (montoFinal && montoFinal > 0) {
+      if (Array.isArray(req.body.deportes_matricula)) {
+        // Actualizar matricula_pagada por cada deporte elegido
+        await db.query('UPDATE inscripciones SET matricula_pagada = 0 WHERE alumno_id = ? AND estado = "activa"', [alumno.alumno_id]);
+        if (req.body.deportes_matricula.length > 0) {
+          for (const depNombre of req.body.deportes_matricula) {
+            await db.query(`
+              UPDATE inscripciones i
+              JOIN deportes d ON i.deporte_id = d.deporte_id
+              SET i.matricula_pagada = 1
+              WHERE i.alumno_id = ? AND i.estado = 'activa' AND d.nombre = ?
+            `, [alumno.alumno_id, depNombre]);
+          }
+        }
+        if (montoFinal && montoFinal > 0) montoParaMensualidad = montoFinal;
+      } else if (req.body.matricula_pagada !== undefined) {
+        const matPagadaVal = (req.body.matricula_pagada === 1 || req.body.matricula_pagada === true || req.body.matricula_pagada === '1') ? 1 : 0;
+        await db.query('UPDATE inscripciones SET matricula_pagada = ? WHERE alumno_id = ? AND estado = "activa"', [matPagadaVal, alumno.alumno_id]);
+        if (montoFinal && montoFinal > 0) montoParaMensualidad = montoFinal;
+      } else if (montoFinal && montoFinal > 0) {
         if (montoFinal > montoMensual) {
           // Cubrió mensualidad + matrícula (o exceso)
           montoParaMensualidad = montoMensual;
@@ -10705,6 +10729,39 @@ app.put('/api/admin/inscripciones/activar/:inscripcionId', async (req, res) => {
     });
   } catch (error) {
     console.error('Error al activar inscripción:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/inscripciones/:inscripcionId/matricula
+ * Cambiar estado de matrícula de una inscripción (1 = pagada, 0 = exonerada/no pagada)
+ */
+app.put('/api/admin/inscripciones/:inscripcionId/matricula', async (req, res) => {
+  try {
+    const { inscripcionId } = req.params;
+    const { matricula_pagada } = req.body;
+    
+    const valor = (matricula_pagada === 1 || matricula_pagada === true || matricula_pagada === '1') ? 1 : 0;
+    
+    await db.query(
+      'UPDATE inscripciones SET matricula_pagada = ?, updated_at = NOW() WHERE inscripcion_id = ?',
+      [valor, inscripcionId]
+    );
+
+    // Invalidar caché del alumno
+    const [insRows] = await db.query(
+      'SELECT a.dni FROM inscripciones i JOIN alumnos a ON i.alumno_id = a.alumno_id WHERE i.inscripcion_id = ?',
+      [inscripcionId]
+    );
+    if (insRows.length > 0 && insRows[0].dni) {
+      invalidateDNICache(insRows[0].dni);
+    }
+    
+    console.log(`💳 Matrícula de inscripción ${inscripcionId} actualizada a: ${valor === 1 ? 'PAGADA' : 'EXONERADA/NO PAGADA'}`);
+    res.json({ success: true, matricula_pagada: valor });
+  } catch (error) {
+    console.error('Error al actualizar matrícula de inscripción:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
