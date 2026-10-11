@@ -9455,7 +9455,7 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     const nombreCompleto = `${alumno.nombres || ''} ${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim();
 
     // 2. Obtener inscripciones y horarios del alumno
-    const [inscripciones] = await db.query(`
+    let [inscripciones] = await db.query(`
       SELECT 
         i.inscripcion_id, i.plan, i.precio_mensual, i.estado,
         d.nombre AS deporte, d.deporte_id,
@@ -9468,26 +9468,67 @@ const handlerValidarAccesoPuerta = async (req, res) => {
     `, [alumno.alumno_id]);
 
     if (inscripciones.length === 0) {
-      return res.json({
-        success: true,
-        activo: false,
-        sin_clase_hoy: false,
-        aviso: 'MEMBRESÍA INACTIVA - No ha pagado mensualidad',
-        motivo: 'El alumno no tiene inscripciones activas',
-        puede_autorizar: !!admin,
-        alumno: {
-          alumno_id: alumno.alumno_id,
-          dni: alumno.dni,
-          nombres: alumno.nombres,
-          apellidos: `${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim(),
-          nombre_completo: nombreCompleto,
-          foto_carnet_url: alumno.foto_carnet_url,
-          fecha_nacimiento: alumno.fecha_nacimiento,
-          deporte: 'Sin inscripción',
-          plan: 'Inactivo'
-        },
-        horario_hoy: null
-      });
+      // Buscar inscripciones históricas/previas del alumno para rescatar deporte y horario
+      const [histInsc] = await db.query(`
+        SELECT 
+          i.inscripcion_id, i.plan, i.precio_mensual, i.estado,
+          d.nombre AS deporte, d.deporte_id,
+          h.horario_id, h.dia, h.hora_inicio, h.hora_fin, h.categoria
+        FROM inscripciones i
+        JOIN deportes d ON d.deporte_id = i.deporte_id
+        LEFT JOIN inscripcion_horarios ih ON ih.inscripcion_id = i.inscripcion_id
+        LEFT JOIN horarios h ON h.horario_id = ih.horario_id
+        WHERE i.alumno_id = ?
+        ORDER BY i.inscripcion_id DESC
+      `, [alumno.alumno_id]);
+
+      if (!forzar_ingreso && !esPagoClase) {
+        return res.json({
+          success: true,
+          activo: false,
+          sin_clase_hoy: false,
+          aviso: 'MEMBRESÍA INACTIVA - No ha pagado mensualidad',
+          motivo: 'El alumno no tiene inscripciones activas',
+          puede_autorizar: !!admin,
+          alumno: {
+            alumno_id: alumno.alumno_id,
+            dni: alumno.dni,
+            nombres: alumno.nombres,
+            apellidos: `${alumno.apellido_paterno || ''} ${alumno.apellido_materno || ''}`.trim(),
+            nombre_completo: nombreCompleto,
+            foto_carnet_url: alumno.foto_carnet_url,
+            fecha_nacimiento: alumno.fecha_nacimiento,
+            deporte: histInsc[0]?.deporte || 'Sin inscripción',
+            plan: histInsc[0]?.plan || 'Inactivo',
+            categoria: histInsc[0]?.categoria || ''
+          },
+          horario_hoy: null
+        });
+      }
+
+      // Si el administrador autorizó o el alumno pagó por clase:
+      if (histInsc.length > 0) {
+        inscripciones = histInsc;
+      } else {
+        // Alumno sin inscripciones registradas: vincular horario por defecto
+        const [hDefault] = await db.query(`
+          SELECT h.horario_id, h.dia, h.hora_inicio, h.hora_fin, h.categoria, d.nombre AS deporte, d.deporte_id
+          FROM horarios h
+          JOIN deportes d ON d.deporte_id = h.deporte_id
+          WHERE h.estado = 'activo'
+          ORDER BY h.horario_id ASC
+          LIMIT 1
+        `);
+        if (hDefault.length > 0) {
+          inscripciones = [{
+            inscripcion_id: null,
+            plan: 'Clase Suelta',
+            precio_mensual: montoClaseNum || 15,
+            estado: 'pago_por_clase',
+            ...hDefault[0]
+          }];
+        }
+      }
     }
 
     // 3. Fecha y hora local de Perú (UTC-5)
@@ -9538,9 +9579,19 @@ const handlerValidarAccesoPuerta = async (req, res) => {
       });
     }
 
-    // Horario a asignar: el de hoy si existe, o el primero si fue forzado por administración
-    const horarioFinal = horarioHoy || inscripciones[0];
-    const horarioIdFinal = horarioFinal?.horario_id || null;
+    // Horario a asignar: el de hoy si existe, o el primero si fue forzado por administración o pago por clase
+    let horarioFinal = horarioHoy || (inscripciones.length > 0 ? inscripciones[0] : null);
+    let horarioIdFinal = horarioFinal?.horario_id || null;
+
+    if (!horarioIdFinal && (forzar_ingreso || esPagoClase)) {
+      const [hFallback] = await db.query(
+        'SELECT horario_id, dia, hora_inicio, hora_fin, categoria FROM horarios WHERE estado = "activo" ORDER BY horario_id ASC LIMIT 1'
+      );
+      if (hFallback.length > 0) {
+        horarioIdFinal = hFallback[0].horario_id;
+        if (!horarioFinal) horarioFinal = hFallback[0];
+      }
+    }
 
     // 5. Evaluar Regla de Membresía (Día 1-5 vs Día 6+)
     let activo = false;
@@ -9725,14 +9776,14 @@ app.get('/api/admin/alumnos/:dni/asistencias', verificarAutenticacion, verificar
         COALESCE(ast.asistencia_puerta, 0) AS asistencia_puerta,
         TIME_FORMAT(ast.hora_puerta, '%H:%i') AS hora_puerta,
         ast.observaciones,
-        d.nombre AS deporte,
+        COALESCE(d.nombre, 'General') AS deporte,
         h.dia,
         h.hora_inicio,
         h.hora_fin,
         h.categoria
       FROM asistencias ast
-      JOIN horarios h ON ast.horario_id = h.horario_id
-      JOIN deportes d ON h.deporte_id = d.deporte_id
+      LEFT JOIN horarios h ON ast.horario_id = h.horario_id
+      LEFT JOIN deportes d ON h.deporte_id = d.deporte_id
       WHERE ast.alumno_id = ?
     `;
     const params = [alumno[0].alumno_id];
