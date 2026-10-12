@@ -262,12 +262,125 @@ async function initDatabase() {
       console.warn('⚠️ Error al verificar tabla accesos_puerta:', errAcc.message);
     }
 
+    // Sincronizar cupos y liberar vacantes de alumnos inactivos en el arranque
+    try {
+      await sincronizarCuposYDesactivarInactivos();
+    } catch (errSyncCupos) {
+      console.warn('⚠️ Error al sincronizar cupos en arranque:', errSyncCupos.message);
+    }
+
     connection.release();
   } catch (error) {
     console.error('❌ Error al conectar con MySQL:', error);
     console.error('⚠️  El servidor continuará sin base de datos (usará Google Sheets)');
   }
 }
+
+/**
+ * Sincronización inteligente de cupos y liberación automática de vacantes:
+ * - Detecta inscripciones antiguas (> 35 días) sin mensualidad vigente (mes actual ni anterior) ni asistencia reciente (30 días).
+ * - Las pasa a 'cancelada' (liberando automáticamente el cupo mediante triggers).
+ * - Marca como 'inactivo' a los alumnos sin ninguna otra inscripción activa.
+ * - Recalcula cupos_ocupados en la tabla horarios para garantizar coherencia 100%.
+ * - Invalida cachés de horarios e inscritos.
+ */
+async function sincronizarCuposYDesactivarInactivos() {
+  if (!db) return { success: false, error: 'DB no disponible' };
+  try {
+    const MESES = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+    ];
+    const now = new Date();
+    const mesActualIdx = now.getMonth();
+    const anioActual = now.getFullYear();
+    const mesActualNombre = MESES[mesActualIdx];
+    const mesAnteriorNombre = MESES[(mesActualIdx - 1 + 12) % 12];
+    const anioMesAnterior = mesActualIdx === 0 ? anioActual - 1 : anioActual;
+    const colAnio = global.COL_ANIO || 'anio';
+
+    // 1. Buscar inscripciones que ya no tienen actividad vigente
+    const [inactivas] = await db.query(`
+      SELECT i.inscripcion_id, i.alumno_id
+      FROM inscripciones i
+      WHERE i.estado IN ('activa', 'pendiente')
+        AND i.fecha_inscripcion < DATE_SUB(CURDATE(), INTERVAL 35 DAY)
+        AND NOT EXISTS (
+          SELECT 1 FROM pagos_mensuales pm
+          WHERE pm.alumno_id = i.alumno_id
+            AND (
+              (LOWER(pm.mes) IN (?, 'setiembre') AND pm.\`${colAnio}\` = ?)
+              OR
+              (LOWER(pm.mes) = ? AND pm.\`${colAnio}\` = ?)
+            )
+            AND pm.estado IN ('confirmado', 'pendiente')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM asistencias ast
+          WHERE ast.alumno_id = i.alumno_id
+            AND ast.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        )
+    `, [mesAnteriorNombre, anioMesAnterior, mesActualNombre, anioActual]);
+
+    let canceladasCount = 0;
+    if (inactivas.length > 0) {
+      const ids = inactivas.map(r => r.inscripcion_id);
+      const alumnoIds = [...new Set(inactivas.map(r => r.alumno_id))];
+
+      const placeholders = ids.map(() => '?').join(',');
+      await db.query(`
+        UPDATE inscripciones 
+        SET estado = 'cancelada',
+            observaciones = CONCAT(COALESCE(observaciones, ''), '\n[Auto] Cupo liberado por inactividad')
+        WHERE inscripcion_id IN (${placeholders})
+      `, ids);
+      canceladasCount = ids.length;
+
+      const alumnoPlaceholders = alumnoIds.map(() => '?').join(',');
+      await db.query(`
+        UPDATE alumnos a
+        SET a.estado = 'inactivo'
+        WHERE a.alumno_id IN (${alumnoPlaceholders})
+          AND NOT EXISTS (
+            SELECT 1 FROM inscripciones i2
+            WHERE i2.alumno_id = a.alumno_id
+              AND i2.estado IN ('activa', 'pendiente')
+          )
+      `, alumnoIds);
+    }
+
+    // 2. Recalcular cupos_ocupados en horarios para asegurar exactitud matemática
+    await db.query(`
+      UPDATE horarios h
+      SET cupos_ocupados = (
+        SELECT COUNT(*) 
+        FROM inscripcion_horarios ih 
+        INNER JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id 
+        WHERE ih.horario_id = h.horario_id 
+        AND i.estado != 'cancelada'
+      )
+    `);
+
+    // 3. Invalidar cachés
+    if (typeof cache !== 'undefined' && cache && typeof cache.keys === 'function') {
+      const clavesCache = cache.keys().filter(k => k.startsWith('horarios') || k.startsWith('inscritos_'));
+      if (clavesCache.length > 0) cache.del(clavesCache);
+    }
+
+    console.log(`🧹 [Auto-Cupos] Sincronización completada: ${canceladasCount} inscripciones inactivas liberadas. Horarios sincronizados.`);
+    return { success: true, liberadas: canceladasCount };
+  } catch (err) {
+    console.error('❌ Error en sincronizarCuposYDesactivarInactivos:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+// Ejecutar sincronización de cupos periódicamente cada 12 horas
+setInterval(() => {
+  sincronizarCuposYDesactivarInactivos().catch(err => {
+    console.warn('⚠️ Error en intervalo de sincronización de cupos:', err.message);
+  });
+}, 12 * 60 * 60 * 1000);
 
 // Inicializar base de datos
 initDatabase();
@@ -436,6 +549,7 @@ app.get('/api/horarios', async (req, res) => {
       }
     } else {
       console.log(`🔄 FORCE REFRESH - Ignorando caché`);
+      await sincronizarCuposYDesactivarInactivos().catch(() => {});
     }
     
     console.log(`🌐 CACHÉ MISS: ${cacheKey} - Consultando MySQL`);
@@ -6596,20 +6710,15 @@ app.post('/api/cache/clear', (req, res) => {
 
 // ==================== ENDPOINTS DE REUBICACIONES ====================
 
-// Endpoint secreto para reparar cupos desfasados
+// Endpoint para reparar y sincronizar cupos desfasados liberando inactivos
 app.get('/api/admin/reparar-cupos', async (req, res) => {
   try {
-    await db.query(`
-      UPDATE horarios h
-      SET cupos_ocupados = (
-          SELECT COUNT(*) 
-          FROM inscripcion_horarios ih 
-          INNER JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id 
-          WHERE ih.horario_id = h.horario_id 
-          AND i.estado != 'cancelada'
-      )
-    `);
-    res.json({ success: true, message: 'Todos los cupos han sido recalculados y sincronizados correctamente' });
+    const resultado = await sincronizarCuposYDesactivarInactivos();
+    res.json({ 
+      success: true, 
+      message: `Todos los cupos han sido recalculados y sincronizados correctamente. Se liberaron ${resultado.liberadas || 0} cupos de inscripciones inactivas.`,
+      liberadas: resultado.liberadas || 0
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -8999,6 +9108,10 @@ app.delete('/api/admin/niveles/:id', async (req, res) => {
 app.get('/api/admin/horarios', async (req, res) => {
   try {
     if (!db) throw new Error('Base de datos no disponible');
+    
+    if (req.query.refresh === 'true') {
+      await sincronizarCuposYDesactivarInactivos().catch(() => {});
+    }
     
     const deporteId = req.query.deporte_id;
     const estado = req.query.estado;
