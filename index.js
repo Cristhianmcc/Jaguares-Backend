@@ -4113,6 +4113,16 @@ app.post('/api/admin/desactivar-inscripciones', verificarAutenticacion, verifica
       [...idsValidos, alumnoId]
     );
 
+    // Limpiar horarios huérfanos: el trigger after_inscripcion_update ya liberó los cupos
+    // al pasar a 'cancelada'. Ahora borramos las filas de inscripcion_horarios para evitar
+    // que aparezcan como horarios "fantasma" si el alumno se re-inscribe en el mismo horario.
+    // El trigger after_inscripcion_horario_delete NO toca cupos porque la inscripción ya está cancelada.
+    await db.query(
+      `DELETE FROM inscripcion_horarios WHERE inscripcion_id IN (${placeholders})`,
+      idsValidos
+    );
+    console.log(`🧹 Horarios huérfanos limpiados para inscripciones [${idsValidos.join(',')}] de ${dni}`);
+
     const [restantes] = await db.query(
       `SELECT COUNT(*) as total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
       [alumnoId]
@@ -4131,6 +4141,57 @@ app.post('/api/admin/desactivar-inscripciones', verificarAutenticacion, verifica
     res.json({ success: true, message: `Se desactivaron ${idsValidos.length} inscripción(es)`, alumno_inactivo: restantes[0].total === 0 });
   } catch (error) {
     console.error('Error al desactivar inscripciones:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint: Limpiar horarios fantasma de inscripciones canceladas de un alumno
+// Útil para corregir alumnos que re-se-inscribieron y muestran horarios duplicados
+app.post('/api/admin/limpiar-horarios-cancelados/:dni', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { dni } = req.params;
+    if (!dni || dni.length < 8) {
+      return res.status(400).json({ success: false, error: 'DNI inválido' });
+    }
+    if (!db) return res.status(503).json({ success: false, error: 'Base de datos no disponible' });
+
+    const [alumnoRows] = await db.query('SELECT alumno_id FROM alumnos WHERE dni = ?', [dni]);
+    if (alumnoRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Alumno no encontrado' });
+    }
+    const alumnoId = alumnoRows[0].alumno_id;
+
+    // Contar cuántos registros huérfanos hay antes de borrar
+    const [[{ total }]] = await db.query(`
+      SELECT COUNT(*) as total
+      FROM inscripcion_horarios ih
+      JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id
+      WHERE i.alumno_id = ? AND i.estado = 'cancelada'
+    `, [alumnoId]);
+
+    if (total === 0) {
+      return res.json({ success: true, message: 'No hay horarios fantasma para este alumno', eliminados: 0 });
+    }
+
+    // Eliminar filas huérfanas (el trigger no toca cupos porque la inscripción está cancelada)
+    const [result] = await db.query(`
+      DELETE ih FROM inscripcion_horarios ih
+      JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id
+      WHERE i.alumno_id = ? AND i.estado = 'cancelada'
+    `, [alumnoId]);
+
+    invalidateDNICache(dni);
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(inscritosKeys);
+
+    console.log(`🧹 Limpiados ${result.affectedRows} horarios fantasma del alumno DNI ${dni}`);
+    res.json({
+      success: true,
+      message: `Se limpiaron ${result.affectedRows} horario(s) fantasma de inscripciones canceladas`,
+      eliminados: result.affectedRows
+    });
+  } catch (error) {
+    console.error('❌ Error al limpiar horarios cancelados:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
