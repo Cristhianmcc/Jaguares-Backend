@@ -1009,33 +1009,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           const cantidadDias = info.horarios.length;
           const precioMensual = calcularPrecio(cantidadDias, plan, nombreDeporte);
           
-          // ⚠️ VALIDACIÓN: Solo bloquear si ya existe inscripción ACTIVA (no pendiente, esas ya se limpiaron)
-          const [inscripcionActiva] = await conn.query(
-            `SELECT inscripcion_id, estado, plan, precio_mensual 
-             FROM inscripciones 
-             WHERE alumno_id = ? AND deporte_id = ? AND estado = 'activa'
-             LIMIT 1`,
-            [alumnoId, deporteId]
-          );
-          
-          if (inscripcionActiva.length > 0) {
-            const inscExist = inscripcionActiva[0];
-            console.warn(`⚠️ DUPLICADO ACTIVO: Alumno ${alumnoId} ya tiene inscripción ACTIVA en ${nombreDeporte} (ID: ${inscExist.inscripcion_id})`);
-            await conn.rollback();
-            conn.release();
-            return res.status(409).json({
-              success: false,
-              error: 'Inscripción duplicada',
-              message: `Ya tienes una inscripción activa en ${nombreDeporte}. No puedes inscribirte dos veces en el mismo deporte.`,
-              deporte: nombreDeporte,
-              inscripcion_existente: {
-                id: inscExist.inscripcion_id,
-                estado: inscExist.estado,
-                plan: inscExist.plan,
-                precio: inscExist.precio_mensual
-              }
-            });
-          }
+          // Se permite inscribir otro turno/horario complementario del mismo deporte 
+          // siempre que los horarios individuales no choquen entre sí (validado previamente).
+          console.log(`✅ Registrando inscripción para deporte: ${nombreDeporte} (ID: ${deporteId}) - Alumno ID: ${alumnoId}`);
           
           const [result] = await conn.query(
             `INSERT INTO inscripciones (codigo_operacion, alumno_id, deporte_id, plan, precio_mensual, matricula_pagada, estado)
@@ -1573,6 +1549,19 @@ app.post('/api/agregar-horario', async (req, res) => {
       return res.status(409).json({ success: false, error: 'Ya estás inscrito en ese horario' });
     }
 
+    // 3b. Validar que la inscripción no supere el tope máximo de 3 días por paquete
+    const [diasActualesRows] = await db.query(
+      'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
+      [inscripcion_id]
+    );
+    const diasActuales = diasActualesRows[0]?.total || 0;
+    if (diasActuales >= 3) {
+      return res.status(400).json({
+        success: false,
+        error: 'Esta inscripción ya cuenta con el máximo de 3 días por semana. Para inscribir un turno complementario (ej. Martes y Jueves), debes registrarlo como nuevo turno.'
+      });
+    }
+
     // 4. Insertar el nuevo horario
     await db.query(`
       INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)
@@ -1740,35 +1729,76 @@ app.get('/api/verificar-pago/:dni', async (req, res) => {
   }
 });
 
-// Endpoint para validar DNI (verificar formato y si ya existe)
+// Endpoint para validar DNI (verificar formato y si ya existe en MySQL)
 app.get('/api/validar-dni/:dni', async (req, res) => {
   try {
     const { dni } = req.params;
+    const cleanDni = dni ? dni.toString().trim() : '';
     
-    if (!dni || dni.toString().length !== 8) {
+    if (!cleanDni || cleanDni.length !== 8 || !/^\d{8}$/.test(cleanDni)) {
       return res.status(400).json({
         success: false,
         valido: false,
-        error: 'DNI debe tener 8 dígitos'
+        error: 'El DNI debe tener 8 dígitos numéricos'
       });
     }
-    
-    const url = `${APPS_SCRIPT_URL}?action=validar_dni&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}&dni=${encodeURIComponent(dni)}`;
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.error || 'Error al validar DNI');
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        valido: false,
+        error: 'Base de datos no disponible'
+      });
     }
-    
-    res.json(data);
+
+    // 1. Consultar si el alumno existe en MySQL y si tiene inscripciones activas o pendientes
+    const [alumnos] = await db.query(
+      'SELECT alumno_id, nombres, apellido_paterno, apellido_materno FROM alumnos WHERE dni = ? LIMIT 1',
+      [cleanDni]
+    );
+
+    if (alumnos.length === 0) {
+      return res.json({
+        success: true,
+        valido: true,
+        mensaje: 'DNI disponible para registro'
+      });
+    }
+
+    const alumno = alumnos[0];
+
+    // 2. Verificar si tiene inscripciones activas o pendientes
+    const [inscripciones] = await db.query(`
+      SELECT i.inscripcion_id, i.estado, d.nombre as deporte
+      FROM inscripciones i
+      JOIN deportes d ON i.deporte_id = d.deporte_id
+      WHERE i.alumno_id = ? AND i.estado IN ('activa', 'pendiente')
+    `, [alumno.alumno_id]);
+
+    if (inscripciones.length > 0) {
+      const deportes = inscripciones.map(i => i.deporte).filter(Boolean).join(', ');
+      const hayPendiente = inscripciones.some(i => i.estado === 'pendiente');
+      return res.json({
+        success: true,
+        valido: false,
+        ya_inscrito: true,
+        deportes,
+        error: `El DNI ${cleanDni} ya tiene una inscripción ${hayPendiente ? 'registrada/pendiente' : 'activa'}${deportes ? ` en: ${deportes}` : ''}. Consulta tu estado para ver tus horarios o inscribirte en otro deporte.`
+      });
+    }
+
+    // Alumno registrado en histórico pero sin inscripciones activas o pendientes
+    return res.json({
+      success: true,
+      valido: true,
+      mensaje: 'DNI disponible'
+    });
   } catch (error) {
-    console.error('❌ Error al validar DNI:', error);
+    console.error('❌ Error al validar DNI en MySQL:', error);
     res.status(500).json({ 
       success: false,
       valido: false,
-      error: error.message || 'Error al validar DNI' 
+      error: 'Error al verificar el DNI' 
     });
   }
 });
