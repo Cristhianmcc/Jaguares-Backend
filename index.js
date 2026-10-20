@@ -1409,13 +1409,26 @@ app.post('/api/eliminar-horario', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Horario no encontrado en esta inscripción' });
     }
 
-    // 4. Recalcular precio_mensual con el nuevo total de días
-    const [totalRows] = await db.query(
-      'SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?',
+    // 4. Recalcular precio_mensual con el nuevo total de días y auto-sincronizar plan
+    const [horariosRestantes] = await db.query(
+      `SELECT h.plan 
+       FROM inscripcion_horarios ih 
+       JOIN horarios h ON ih.horario_id = h.horario_id 
+       WHERE ih.inscripcion_id = ?`,
       [inscripcion_id]
     );
-    const totalDias = totalRows[0].total;
-    const { plan, deporte } = inscRows[0];
+    const totalDias = horariosRestantes.length;
+
+    // Sincronización inteligente: Si los horarios restantes son Premium (o tienen otro plan específico),
+    // actualizar automáticamente el plan de la inscripción para evitar desfasajes con planes anteriores.
+    const planesRestantes = horariosRestantes.map(h => (h.plan || '').trim()).filter(Boolean);
+    let planEfectivo = inscRows[0].plan || 'Estándar';
+    if (planesRestantes.includes('Premium')) {
+      planEfectivo = 'Premium';
+    } else if (planesRestantes.length > 0 && planesRestantes[0]) {
+      planEfectivo = planesRestantes[0];
+    }
+    const { deporte } = inscRows[0];
 
     const calcularPrecio = (dias, plan, deporte) => {
       if (deporte === 'MAMAS FIT' || plan === 'MAMAS FIT') return 60;
@@ -1427,8 +1440,8 @@ app.post('/api/eliminar-horario', async (req, res) => {
       if (plan === 'Premium') { if (dias === 2) return 100; return 150; }
       return 60;
     };
-    const nuevoPrecio = calcularPrecio(totalDias, plan, deporte);
-    await db.query('UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?', [nuevoPrecio, inscripcion_id]);
+    const nuevoPrecio = calcularPrecio(totalDias, planEfectivo, deporte);
+    await db.query('UPDATE inscripciones SET plan = ?, precio_mensual = ? WHERE inscripcion_id = ?', [planEfectivo, nuevoPrecio, inscripcion_id]);
 
     // 4b. Actualizar monto en pagos_mensuales pendientes del mes actual
     try {
@@ -1567,16 +1580,23 @@ app.post('/api/agregar-horario', async (req, res) => {
       INSERT INTO inscripcion_horarios (inscripcion_id, horario_id) VALUES (?, ?)
     `, [inscripcion_id, horario_id]);
 
-    // 5. Recalcular precio_mensual según el nuevo total de días
-    const [totalDiasRows] = await db.query(`
-      SELECT COUNT(*) as total FROM inscripcion_horarios WHERE inscripcion_id = ?
+    // 5. Recalcular precio_mensual según el nuevo total de días y auto-sincronizar plan
+    const [horariosActuales] = await db.query(`
+      SELECT h.plan 
+      FROM inscripcion_horarios ih 
+      JOIN horarios h ON ih.horario_id = h.horario_id 
+      WHERE ih.inscripcion_id = ?
     `, [inscripcion_id]);
-    const totalDias = totalDiasRows[0].total;
+    const totalDias = horariosActuales.length;
 
-    const [planRows] = await db.query(`
-      SELECT plan FROM inscripciones WHERE inscripcion_id = ?
-    `, [inscripcion_id]);
-    const plan = planRows[0]?.plan || 'Económico';
+    // Sincronización inteligente del plan según los horarios cursados
+    const planesActuales = horariosActuales.map(h => (h.plan || '').trim()).filter(Boolean);
+    let planEfectivo = inscripcion.plan || 'Estándar';
+    if (planesActuales.includes('Premium')) {
+      planEfectivo = 'Premium';
+    } else if (planesActuales.length > 0 && planesActuales[0]) {
+      planEfectivo = planesActuales[0];
+    }
     const deporteNombre = inscripcion.deporte;
 
     // Misma lógica que el endpoint de inscripción
@@ -1607,12 +1627,12 @@ app.post('/api/agregar-horario', async (req, res) => {
       return 60;
     };
 
-    const nuevoPrecio = calcularPrecio(totalDias, plan, deporteNombre);
+    const nuevoPrecio = calcularPrecio(totalDias, planEfectivo, deporteNombre);
     await db.query(`
-      UPDATE inscripciones SET precio_mensual = ? WHERE inscripcion_id = ?
-    `, [nuevoPrecio, inscripcion_id]);
+      UPDATE inscripciones SET plan = ?, precio_mensual = ? WHERE inscripcion_id = ?
+    `, [planEfectivo, nuevoPrecio, inscripcion_id]);
 
-    console.log(`💰 precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} días, plan ${plan})`);
+    console.log(`💰 precio_mensual actualizado: S/.${nuevoPrecio} (${totalDias} días, plan ${planEfectivo})`);
 
     // 5b. Actualizar monto en pagos_mensuales pendientes del mes actual
     try {
@@ -11099,6 +11119,63 @@ app.put('/api/admin/inscripciones/pendiente/:inscripcionId', async (req, res) =>
     });
   } catch (error) {
     console.error('Error al marcar pendiente:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/admin/inscripciones/:inscripcionId/cambiar-plan
+ * Permite a la administración cambiar el plan y precio de una inscripción directamente
+ */
+app.put('/api/admin/inscripciones/:inscripcionId/cambiar-plan', verificarAutenticacion, verificarAdmin, async (req, res) => {
+  try {
+    const { inscripcionId } = req.params;
+    const { plan, precio_mensual } = req.body;
+
+    if (!plan) {
+      return res.status(400).json({ success: false, error: 'El campo plan es requerido' });
+    }
+
+    const [inscripciones] = await db.query(
+      `SELECT i.inscripcion_id, i.alumno_id, d.nombre as deporte
+       FROM inscripciones i
+       JOIN deportes d ON i.deporte_id = d.deporte_id
+       WHERE i.inscripcion_id = ?`,
+      [inscripcionId]
+    );
+
+    if (inscripciones.length === 0) {
+      return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
+    }
+
+    const insc = inscripciones[0];
+    const updates = ['plan = ?', 'updated_at = NOW()'];
+    const params = [plan];
+
+    if (precio_mensual !== undefined && precio_mensual !== null) {
+      updates.push('precio_mensual = ?');
+      params.push(precio_mensual);
+    }
+    params.push(inscripcionId);
+
+    await db.query(`UPDATE inscripciones SET ${updates.join(', ')} WHERE inscripcion_id = ?`, params);
+
+    // Invalidar caché
+    const [alumnoRows] = await db.query('SELECT dni FROM alumnos WHERE alumno_id = ?', [insc.alumno_id]);
+    if (alumnoRows.length > 0) {
+      invalidateDNICache(alumnoRows[0].dni);
+    }
+    cache.flushAll();
+
+    console.log(`✅ Plan de inscripción ${inscripcionId} actualizado a "${plan}"`);
+    res.json({
+      success: true,
+      mensaje: `Plan actualizado correctamente a ${plan}`,
+      inscripcion_id: inscripcionId,
+      nuevo_plan: plan
+    });
+  } catch (error) {
+    console.error('Error al cambiar plan de inscripción:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
