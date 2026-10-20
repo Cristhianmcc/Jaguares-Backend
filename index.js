@@ -3027,9 +3027,17 @@ app.get('/api/admin/pagos-mensuales', verificarAutenticacion, verificarAdmin, as
         p.numero_operacion = null;
       }
 
-      // Si el monto es 0 o null, calcularlo desde sus deportes inscritos
-      if ((!p.monto || parseFloat(p.monto) === 0) && p.deportes_inscritos.length > 0) {
-        p.monto = p.deportes_inscritos.reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
+      // Solo calcular monto desde deportes si:
+      // 1) Es una fila virtual (alumno sin registro de pago previo para este mes) y no tiene monto asignado
+      // 2) O el monto en BD es estrictamente null / undefined / vacío.
+      // ⚠️ Si p.pago_id > 0 y p.monto es 0 numérico (o "0.00"), se RESPETA porque es una beca, sorteo o mes gratis.
+      const montoEsNulo = p.monto === null || p.monto === undefined || p.monto === '';
+      const esFaltanteSinMonto = p.es_sin_pago && (!p.monto || parseFloat(p.monto) === 0);
+
+      if ((montoEsNulo || esFaltanteSinMonto) && p.deportes_inscritos && p.deportes_inscritos.length > 0) {
+        p.monto = p.deportes_inscritos
+          .filter(d => String(d.estado || '').toLowerCase() !== 'cancelada')
+          .reduce((sum, d) => sum + parseFloat(d.precio || 0), 0);
       }
     });
 
@@ -3063,15 +3071,13 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
         const colYear = global.COL_ANIO || 'año';
         const mesNombre = (mes || 'septiembre').toLowerCase();
         const anioNum = parseInt(anio) || new Date().getFullYear();
-        let montoNum = (monto !== undefined && monto !== null) ? parseFloat(monto) : 0;
-        if (!montoNum || montoNum <= 0) {
+        let montoNum = (monto !== undefined && monto !== null && !isNaN(parseFloat(monto))) ? parseFloat(monto) : null;
+        if (montoNum === null) {
           const [montos] = await db.query(
             `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
             [alumnoId]
           );
-          if (montos.length > 0 && montos[0].total) {
-            montoNum = parseFloat(montos[0].total);
-          }
+          montoNum = (montos.length > 0 && montos[0].total != null) ? parseFloat(montos[0].total) : 0;
         }
 
         const [nuevoPago] = await db.query(
@@ -3088,8 +3094,8 @@ app.put('/api/admin/pagos-mensuales/:id/confirmar', verificarAutenticacion, veri
     let updateQuery = `UPDATE pagos_mensuales SET estado = 'confirmado', fecha_pago = NOW(), observaciones = COALESCE(?, observaciones)`;
     const updateParams = [observaciones || null];
     
-    // Si se envía un monto ajustado, actualizar también
-    if (monto !== undefined && monto !== null) {
+    // Si se envía un monto ajustado, actualizar también (permite 0 explícito)
+    if (monto !== undefined && monto !== null && !isNaN(parseFloat(monto))) {
       updateQuery += `, monto = ?`;
       updateParams.push(parseFloat(monto));
     }
@@ -3175,13 +3181,13 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
     if (pago.length > 0) {
       let updSql = 'UPDATE pagos_mensuales SET observaciones = ?';
       const updParams = [observaciones || null];
-      // Si el monto de este registro era 0, intentar recuperar el monto real de inscripciones
-      if (!pago[0].monto || parseFloat(pago[0].monto) === 0) {
+      // Solo si el monto en BD es estrictamente null o undefined, intentar recuperar de inscripciones
+      if (pago[0].monto === null || pago[0].monto === undefined) {
         const [montos] = await db.query(
           `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
           [pago[0].alumno_id]
         );
-        if (montos.length > 0 && montos[0].total) {
+        if (montos.length > 0 && montos[0].total != null) {
           updSql += ', monto = ?';
           updParams.push(parseFloat(montos[0].total));
         }
@@ -3205,15 +3211,13 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
       const colYear = global.COL_ANIO || 'año';
       const mesNombre = (mes || 'septiembre').toLowerCase();
       const anioNum = parseInt(anio) || new Date().getFullYear();
-      let montoNum = parseFloat(monto) || 0;
-      if (!montoNum || montoNum <= 0) {
+      let montoNum = (monto !== undefined && monto !== null && !isNaN(parseFloat(monto))) ? parseFloat(monto) : null;
+      if (montoNum === null) {
         const [montos] = await db.query(
           `SELECT SUM(precio_mensual) AS total FROM inscripciones WHERE alumno_id = ? AND estado IN ('activa', 'pendiente')`,
           [alumnoId]
         );
-        if (montos.length > 0 && montos[0].total) {
-          montoNum = parseFloat(montos[0].total);
-        }
+        montoNum = (montos.length > 0 && montos[0].total != null) ? parseFloat(montos[0].total) : 0;
       }
 
       const [existente] = await db.query(
@@ -3224,7 +3228,7 @@ app.put('/api/admin/pagos-mensuales/:id/observaciones', verificarAutenticacion, 
       if (existente.length > 0) {
         let updSql = 'UPDATE pagos_mensuales SET observaciones = ?';
         const updParams = [observaciones || null];
-        if ((!existente[0].monto || parseFloat(existente[0].monto) === 0) && montoNum > 0) {
+        if ((existente[0].monto === null || existente[0].monto === undefined) && montoNum != null) {
           updSql += ', monto = ?';
           updParams.push(montoNum);
         }
